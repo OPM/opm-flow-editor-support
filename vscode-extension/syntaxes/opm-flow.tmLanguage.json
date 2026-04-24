@@ -20,7 +20,7 @@
     },
     "sections": {
       "name": "entity.name.function.section.opm-flow",
-      "match": "^\\s*(RUNSPEC|GRID|EDIT|PROPS|REGIONS|SOLUTION|SUMMARY|SCHEDULE|OPTIMIZE)\\s*$"
+      "match": "^\\s*(RUNSPEC|GRID|EDIT|PROPS|REGIONS|SOLUTION|SUMMARY|SCHEDULE)\\s*$"
     },
     "end-keyword": {
       "name": "keyword.control.end.opm-flow",

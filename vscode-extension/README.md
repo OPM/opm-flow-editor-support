@@ -15,7 +15,7 @@ NB! This is a beta test release
 
 Provides syntax highlighting for OPM Flow simulation deck files with support for:
 
-- **Section headers**: `RUNSPEC`, `GRID`, `EDIT`, `PROPS`, `REGIONS`, `SOLUTION`, `SUMMARY`, `SCHEDULE`, `OPTIMIZE` — scoped so most themes render them in a distinct color (yellow in Dark+)
+- **Section headers**: `RUNSPEC`, `GRID`, `EDIT`, `PROPS`, `REGIONS`, `SOLUTION`, `SUMMARY`, `SCHEDULE` — scoped so most themes render them in a distinct color (yellow in Dark+)
 - **Keywords**: ALL_CAPS identifiers (e.g., `COMPDAT`, `WELSPECS`, `DATES`)
 - **Comments**: Lines starting with `--`
 - **Record terminators**: `/` marking the end of a record
@@ -64,7 +64,7 @@ keyword documentation, since it scrolls freely and stays visible while you edit.
 
 Sections and individual keywords can be folded in the editor gutter. A section
 runs from a section keyword (`RUNSPEC`, `GRID`, `EDIT`, `PROPS`, `REGIONS`,
-`SOLUTION`, `SUMMARY`, `SCHEDULE`, `OPTIMIZE`) until the next section keyword,
+`SOLUTION`, `SUMMARY`, `SCHEDULE`) until the next section keyword,
 `END`, or end of file. Individual keyword folds nest inside their section so
 you can collapse whole sections at once or drill in one keyword at a time.
 

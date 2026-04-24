@@ -556,7 +556,7 @@ function computeAlignEdits(document: vscode.TextDocument, range?: vscode.Range):
 
 const SECTION_KEYWORDS = [
   'RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS',
-  'SOLUTION', 'SUMMARY', 'SCHEDULE', 'OPTIMIZE'
+  'SOLUTION', 'SUMMARY', 'SCHEDULE'
 ] as const;
 const SECTION_KEYWORD_SET: ReadonlySet<string> = new Set(SECTION_KEYWORDS);
 

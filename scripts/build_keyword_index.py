@@ -43,7 +43,6 @@ SECTION_MAP = {
     "9.3":  "SOLUTION",
     "10.3": "SUMMARY",
     "11.3": "SCHEDULE",
-    "12.3": "OPTIMIZE",
 }
 
 # Paragraph style names that indicate a heading in the OPM manual
