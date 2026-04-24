@@ -4,6 +4,7 @@
   "description": "Language support for OPM Flow reservoir simulation deck files",
   "version": "0.6.0",
   "publisher": "magne-sjaastad",
+  "icon": "icon.png",
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
