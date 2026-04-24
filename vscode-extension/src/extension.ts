@@ -282,18 +282,22 @@ interface RecordLine {
   indent: string;
   tokens: string[];
   trailComment: string;
+  hasTerminator: boolean;
 }
+
+const KEYWORD_TOKEN_RE = /^[A-Z][A-Z0-9_+-]*$/;
 
 function parseRecordLine(line: string): RecordLine | null {
   const indent = line.match(/^[ \t]*/)![0];
   let i = indent.length;
   const tokens: string[] = [];
+  let hasTerminator = false;
 
   while (i < line.length) {
     while (i < line.length && (line[i] === ' ' || line[i] === '\t')) i++;
-    if (i >= line.length) return null;
-    if (line[i] === '-' && line[i + 1] === '-') return null;
-    if (line[i] === '/') break;
+    if (i >= line.length) break;
+    if (line[i] === '-' && line[i + 1] === '-') break;
+    if (line[i] === '/') { hasTerminator = true; break; }
 
     const start = i;
     if (line[i] === "'") {
@@ -312,13 +316,18 @@ function parseRecordLine(line: string): RecordLine | null {
     }
   }
 
-  if (i >= line.length || line[i] !== '/') return null;
-  i++;
+  if (tokens.length === 0) return null;
+
+  if (hasTerminator) {
+    i++;
+  } else if (tokens.length === 1 && KEYWORD_TOKEN_RE.test(tokens[0])) {
+    // A lone uppercase identifier on a line is a keyword declaration, not a record.
+    return null;
+  }
 
   const rest = line.substring(i).replace(/^[ \t]+/, '').trimEnd();
   if (rest && !rest.startsWith('--')) return null;
-  if (tokens.length === 0) return null;
-  return { indent, tokens, trailComment: rest };
+  return { indent, tokens, trailComment: rest, hasTerminator };
 }
 
 function isCommentLine(line: string): boolean {
@@ -341,7 +350,7 @@ function formatRecordGroup(records: RecordLine[]): string[] {
     const cells = r.tokens.map((t, c) =>
       numeric[c] ? t.padStart(widths[c]) : t.padEnd(widths[c])
     );
-    const body = groupIndent + cells.join(' ') + ' /';
+    const body = groupIndent + cells.join(' ') + (r.hasTerminator ? ' /' : '');
     return r.trailComment ? `${body} ${r.trailComment}` : body;
   });
 }
@@ -393,7 +402,7 @@ function formatRecordGroupWithHeading(records: RecordLine[], headingPositions: n
       while (line.length < pos) line += ' ';
       line += t;
     }
-    line = line.trimEnd() + ' /';
+    line = line.trimEnd() + (r.hasTerminator ? ' /' : '');
     return r.trailComment ? `${line} ${r.trailComment}` : line;
   });
 }
@@ -437,7 +446,7 @@ function buildHeadingAndAlignedRecords(
       while (line.length < pos) line += ' ';
       line += t;
     }
-    line = line.trimEnd() + ' /';
+    line = line.trimEnd() + (r.hasTerminator ? ' /' : '');
     return r.trailComment ? `${line} ${r.trailComment}` : line;
   });
   return { heading, formattedRecords };
