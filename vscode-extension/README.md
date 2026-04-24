@@ -3,6 +3,10 @@
 Language support for [OPM Flow](https://opm-project.org/) reservoir simulation deck files,
 with syntax highlighting and development features backed by the full OPM Flow reference manual.
 
+<!-- manual-ref:start -->
+Keyword data is built from [OPM/opm-reference-manual](https://github.com/OPM/opm-reference-manual) at commit [`85395fc0`](https://github.com/OPM/opm-reference-manual/commit/85395fc009a70d96019535bf15318150e48b090d).
+<!-- manual-ref:end -->
+
 NB! This is a beta test release
 
 ## Features

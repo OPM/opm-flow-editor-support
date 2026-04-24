@@ -1,6 +1,6 @@
 {
   "name": "opm-flow-editor-support",
-  "displayName": "OPM Flow",
+  "displayName": "OPM Flow Editor Support",
   "description": "Language support for OPM Flow reservoir simulation deck files",
   "version": "0.6.0",
   "publisher": "magne-sjaastad",
@@ -130,10 +130,11 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run sync-manual-ref && npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "build-index": "py ../scripts/build_keyword_index.py --manual-dir ../opm-reference-manual --output data/keyword_index.json --compact data/keyword_index_compact.json"
+    "build-index": "py ../scripts/build_keyword_index.py --manual-dir ../opm-reference-manual --output data/keyword_index.json --compact data/keyword_index_compact.json",
+    "sync-manual-ref": "node scripts/sync-manual-ref.js README.md"
   },
   "devDependencies": {
     "@types/vscode": "^1.74.0",
