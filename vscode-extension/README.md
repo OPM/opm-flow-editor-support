@@ -28,15 +28,18 @@ Provides syntax highlighting for OPM Flow simulation deck files with support for
 ### Keyword Autocompletion
 
 Autocomplete support for OPM Flow keywords extracted from the reference manual.
-Each completion item shows the deck section (`RUNSPEC`, `GRID`, `SCHEDULE`, etc.) and
-a one-line description in the documentation pane. Completions are triggered when typing
-uppercase letters at the start of a line.
+Each completion item shows the deck section(s) the keyword is valid in
+(`RUNSPEC`, `GRID`, `SCHEDULE`, …) and a one-line summary in the documentation
+pane. Keywords that are valid in every section (e.g. `INCLUDE`, `ECHO`) list
+them all. Completions are triggered when typing uppercase letters at the start
+of a line.
 
 ### Hover Tooltips
 
 Hover over any keyword to see a quick tooltip with:
 
-- A **description** from the reference manual
+- The **keyword name and all valid sections**
+- A **summary** from the reference manual
 - A **parameter table** listing all record fields with units and defaults
 - A usage **example**
 
@@ -49,13 +52,21 @@ shows the `GRPNAME` parameter description, units, and default.
 Open the **Explorer** sidebar (`Ctrl+Shift+E`) and scroll down to the **OPM Keyword Reference** panel.
 It updates automatically as you move the cursor — no keystrokes needed:
 
-- **Cursor on a keyword** → full documentation: description, complete parameter table, example
+- **Cursor on a keyword** → full documentation: valid sections, summary, complete parameter table, example
 - **Cursor on a value column** → same view with the matching parameter row highlighted
 - **Cursor on whitespace or a comment** → panel retains the last shown keyword
 
-The panel shows the keyword name, description, parameter table, and example.
-This is the main view for reading long keyword documentation, since it scrolls freely
-and stays visible while you edit.
+The panel shows the keyword name, the section(s) it applies to, the summary,
+the parameter table, and the example. This is the main view for reading long
+keyword documentation, since it scrolls freely and stays visible while you edit.
+
+### Collapse Sections and Keywords
+
+Sections and individual keywords can be folded in the editor gutter. A section
+runs from a section keyword (`RUNSPEC`, `GRID`, `EDIT`, `PROPS`, `REGIONS`,
+`SOLUTION`, `SUMMARY`, `SCHEDULE`, `OPTIMIZE`) until the next section keyword,
+`END`, or end of file. Individual keyword folds nest inside their section so
+you can collapse whole sections at once or drill in one keyword at a time.
 
 ### Align Record Columns
 

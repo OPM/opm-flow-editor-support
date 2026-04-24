@@ -50,12 +50,15 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
 
 - **Syntax highlighting** for section headers, keywords, comments, record
   terminators, numbers, repeat markers, and template variables.
-- **Keyword autocompletion** for all 1145 OPM Flow keywords, with section
-  and one-line description shown inline.
-- **Hover tooltips** showing keyword description, parameter table, and example.
-  Hovering over a value in a data record shows the matching parameter column.
+- **Keyword autocompletion** for OPM Flow keywords, with every valid section
+  and a one-line summary shown inline.
+- **Hover tooltips** showing all valid sections for the keyword, a summary,
+  parameter table, and example. Hovering over a value in a data record shows
+  the matching parameter column.
 - **Docs sidebar panel** that follows the cursor — full documentation for the
   keyword under the cursor, with the active parameter row highlighted.
+- **Collapsible sections and keywords** — fold section blocks (from one
+  section keyword to the next) or individual keywords in the gutter.
 - **Align Record Columns** — tidy up record blocks so every column lines up;
   handles comment lines inside the group and aligns to heading comments above
   the group.
