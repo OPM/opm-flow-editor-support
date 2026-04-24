@@ -5,13 +5,19 @@ backed by the full [OPM Flow reference manual](https://github.com/OPM/opm-refere
 
 ## Install
 
-### From marketplace
-TODO
+### From the VS Code Marketplace
+
+1. Open the **Extensions** view (`Ctrl+Shift+X` / `Cmd+Shift+X`).
+2. Search for **OPM Flow** and click **Install**.
+
+Or from the command palette: `ext install magne-sjaastad.opm-flow-editor-support`.
+
+Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-sjaastad.opm-flow-editor-support>
 
 ### From a GitHub Release
 
 1. **Download the `.vsix` file** from the [Releases page](https://github.com/OPM/opm-flow-editor-support/releases/latest).
-   Look for a file named `opm-flow-<version>.vsix` under the release assets.
+   Look for a file named `opm-flow-editor-support-<version>.vsix` under the release assets.
 
 2. **Open VS Code.**
 

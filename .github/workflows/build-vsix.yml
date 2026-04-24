@@ -89,6 +89,27 @@ jobs:
         with:
           files: vscode-extension/opm-flow-editor-support-*.vsix
 
+  publish-marketplace:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Download VSIX
+        uses: actions/download-artifact@v8
+        with:
+          name: opm-flow-editor-support-vsix
+          path: .
+
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce publish --packagePath opm-flow-editor-support-*.vsix --pat "$VSCE_PAT"
+
   # Disabled until Open VSX account + OVSX_PAT secret are set up.
   # To re-enable: change `if: false` back to `if: startsWith(github.ref, 'refs/tags/v')`.
   publish-ovsx:

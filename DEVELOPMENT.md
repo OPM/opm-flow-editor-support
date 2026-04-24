@@ -60,12 +60,33 @@ python build_keyword_index.py \
 
 ## Release
 
-Releases are tag-driven. On pushing a `v*` tag, CI rebuilds the keyword index
-from the submodule, packages a VSIX, and attaches it to a GitHub Release.
+Releases are tag-driven. On pushing a `v*` tag, CI:
+
+1. Rebuilds the keyword index from the submodule.
+2. Packages a VSIX named `opm-flow-editor-support-<version>.vsix`.
+3. Attaches the VSIX to a GitHub Release.
+4. Publishes the VSIX to the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=magne-sjaastad.opm-flow-editor-support)
+   using the `VSCE_PAT` repo secret.
 
 ```sh
 # bump vscode-extension/package.json "version"
-git commit -am "Release v0.5.1"
-git tag v0.5.1
+git commit -am "Release v0.6.1"
+git tag v0.6.1
 git push && git push --tags
+```
+
+### Marketplace publishing prerequisites
+
+Already in place for this repo, but documented for reference:
+
+- **Publisher**: `magne-sjaastad` on the [VS Code Marketplace](https://marketplace.visualstudio.com/manage/publishers/magne-sjaastad).
+- **Repo secret `VSCE_PAT`**: an Azure DevOps Personal Access Token with scope
+  *Marketplace > Manage*. Rotate by generating a new PAT and replacing the secret.
+
+To publish manually from a workstation (bypassing CI):
+
+```sh
+cd vscode-extension
+npx vsce login magne-sjaastad   # one-time, paste PAT
+npx vsce publish                # bumps version interactively if asked
 ```
