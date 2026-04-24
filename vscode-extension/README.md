@@ -3,6 +3,8 @@
 Language support for [OPM Flow](https://opm-project.org/) reservoir simulation deck files,
 with syntax highlighting and development features backed by the full OPM Flow reference manual.
 
+NB! This is a beta test release
+
 ## Features
 
 ### Syntax Highlighting
@@ -134,67 +136,6 @@ Section data files (Eclipse/OPM include conventions): `.aqucon`, `.aqunum`, `.di
 `.eqlnum`, `.equil`, `.fault`, `.fipnum`, `.multnum`, `.multregp`, `.multregt`, `.nnc`,
 `.ntg`, `.opernum`, `.perm`, `.poro`, `.pvt`, `.rocknum`, `.satnum`, `.sattab`,
 `.tabdims`, `.thpres`.
-
-## Installation in VS Code
-
-### From the repository (development / local install)
-
-1. **Install dependencies and compile:**
-   ```bash
-   cd vscode-extension
-   npm install
-   npm run compile
-   ```
-
-2. **Open the extension folder in VS Code**, then press **F5** to launch an Extension
-   Development Host. All features will be active for any supported file you open.
-
-3. **To install permanently** without publishing, package the extension and install it:
-   ```bash
-   npm install -g @vscode/vsce
-   vsce package
-   # produces opm-flow-0.6.0.vsix
-   ```
-   Then in VS Code: **Extensions → ⋯ → Install from VSIX…** and select the `.vsix` file.
-
-## Updating the Keyword Index
-
-The keyword documentation is extracted from the `.fodt` files in the reference manual
-repository and stored in `data/keyword_index_compact.json`. When the manual is updated,
-regenerate this file:
-
-### Prerequisites
-
-```bash
-pip install lxml
-```
-
-### Run the extractor
-
-From the **repository root** (one level above `vscode-extension/`):
-
-```bash
-python scripts/build_keyword_index.py \
-    --manual-dir . \
-    --output vscode-extension/data/keyword_index.json \
-    --compact vscode-extension/data/keyword_index_compact.json
-```
-
-Or use the npm shortcut from inside `vscode-extension/`:
-
-```bash
-npm run build-index
-```
-
-This reads every `.fodt` file under `parts/chapters/subsections/` and produces:
-
-| File | Size | Purpose |
-|------|------|---------|
-| `data/keyword_index.json` | ~22 MB | Full index with complete descriptions — not committed, not bundled |
-| `data/keyword_index_compact.json` | ~1 MB | Compact index bundled in the extension |
-
-After regenerating, recompile the extension (`npm run compile`) and commit
-`data/keyword_index_compact.json`.
 
 ## Language ID
 
