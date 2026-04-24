@@ -1,0 +1,144 @@
+{
+  "name": "opm-flow-editor-support",
+  "displayName": "OPM Flow Editor Support",
+  "description": "Language support for OPM Flow reservoir simulation deck files",
+  "version": "0.6.1",
+  "publisher": "magne-sjaastad",
+  "icon": "icon.png",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OPM/opm-flow-editor-support.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OPM/opm-flow-editor-support/issues"
+  },
+  "homepage": "https://github.com/OPM/opm-flow-editor-support#readme",
+  "keywords": [
+    "opm",
+    "flow",
+    "reservoir",
+    "simulation",
+    "eclipse",
+    "deck",
+    "reservoir-engineering"
+  ],
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:opm-flow",
+    "onView:opm-flow.docsView"
+  ],
+  "main": "./out/extension",
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "opm-flow.docsView",
+          "name": "OPM Keyword Reference"
+        }
+      ]
+    },
+    "languages": [
+      {
+        "id": "opm-flow",
+        "aliases": [
+          "OPM Flow",
+          "reservoir-simulation"
+        ],
+        "extensions": [
+          ".data",
+          ".DATA",
+          ".inc",
+          ".INC",
+          ".include",
+          ".sch",
+          ".SCH",
+          ".schedule",
+          ".grdecl",
+          ".GRDECL",
+          ".vfp",
+          ".VFP",
+          ".prop",
+          ".Ecl",
+          ".ecl",
+          ".summary",
+          ".aqucon",
+          ".aqunum",
+          ".dimens",
+          ".eqlnum",
+          ".equil",
+          ".fault",
+          ".fipnum",
+          ".multnum",
+          ".multregp",
+          ".multregt",
+          ".nnc",
+          ".ntg",
+          ".opernum",
+          ".perm",
+          ".poro",
+          ".pvt",
+          ".rocknum",
+          ".satnum",
+          ".sattab",
+          ".tabdims",
+          ".thpres"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "opm-flow",
+        "scopeName": "source.opm-flow",
+        "path": "./syntaxes/opm-flow.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "opm-flow.generateKeywordReference",
+        "title": "OPM Flow: Generate Keyword Reference"
+      },
+      {
+        "command": "opm-flow.alignRecordColumns",
+        "title": "OPM Flow: Align Record Columns"
+      },
+      {
+        "command": "opm-flow.addColumnHeaders",
+        "title": "OPM Flow: Add Column Headers"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "opm-flow.alignRecordColumns",
+          "when": "resourceLangId == opm-flow",
+          "group": "opm-flow"
+        },
+        {
+          "command": "opm-flow.addColumnHeaders",
+          "when": "resourceLangId == opm-flow",
+          "group": "opm-flow"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run sync-manual-ref && npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build-index": "py ../scripts/build_keyword_index.py --manual-dir ../opm-reference-manual --output data/keyword_index.json --compact data/keyword_index_compact.json",
+    "sync-manual-ref": "node scripts/sync-manual-ref.js README.md"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0",
+    "@types/node": "18.x",
+    "typescript": "^5.0.0"
+  }
+}

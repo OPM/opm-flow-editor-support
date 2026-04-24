@@ -1,0 +1,7 @@
+node_modules/**
+src/**
+scripts/**
+.vscode/**
+tsconfig.json
+.vscodeignore
+data/keyword_index.json

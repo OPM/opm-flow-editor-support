@@ -1,0 +1,58 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "OPM Flow",
+  "scopeName": "source.opm-flow",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#sections" },
+    { "include": "#end-keyword" },
+    { "include": "#keywords" },
+    { "include": "#strings" },
+    { "include": "#variables" },
+    { "include": "#defaults" },
+    { "include": "#numbers" },
+    { "include": "#terminators" }
+  ],
+  "repository": {
+    "comments": {
+      "name": "comment.line.double-dash.opm-flow",
+      "match": "--.*$"
+    },
+    "sections": {
+      "name": "entity.name.function.section.opm-flow",
+      "match": "^\\s*(RUNSPEC|GRID|EDIT|PROPS|REGIONS|SOLUTION|SUMMARY|SCHEDULE)\\s*$"
+    },
+    "end-keyword": {
+      "name": "keyword.control.end.opm-flow",
+      "match": "^\\s*END\\s*$"
+    },
+    "keywords": {
+      "name": "keyword.control.opm-flow",
+      "match": "^\\s*[A-Z][A-Z0-9_+-]*\\s*$|^\\s*[A-Z][A-Z0-9_+-]*(?=\\s)"
+    },
+    "strings": {
+      "name": "string.quoted.single.opm-flow",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        { "name": "constant.character.escape.opm-flow", "match": "\\\\." }
+      ]
+    },
+    "variables": {
+      "name": "variable.other.template.opm-flow",
+      "match": "<[A-Z][A-Z0-9_]*>"
+    },
+    "defaults": {
+      "name": "constant.language.default.opm-flow",
+      "match": "(?<![A-Za-z0-9_])\\d+\\*"
+    },
+    "numbers": {
+      "name": "constant.numeric.opm-flow",
+      "match": "(?<![A-Za-z_])[-+]?[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?(?![A-Za-z_*])"
+    },
+    "terminators": {
+      "name": "punctuation.terminator.opm-flow",
+      "match": "^\\s*/\\s*$|(?<=\\S)\\s*/"
+    }
+  }
+}

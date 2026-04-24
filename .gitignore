@@ -1,0 +1,17 @@
+# Node / VS Code extension build output
+vscode-extension/node_modules/
+vscode-extension/out/
+vscode-extension/*.vsix
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editor / OS
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
