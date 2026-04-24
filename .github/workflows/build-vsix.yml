@@ -1,0 +1,113 @@
+name: Build VSIX
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with submodule)
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Build keyword index
+        run: |
+          python scripts/build_keyword_index.py \
+            --manual-dir opm-reference-manual \
+            --output keyword_index.json \
+            --compact vscode-extension/data/keyword_index_compact.json
+
+      - name: Upload keyword index
+        uses: actions/upload-artifact@v7
+        with:
+          name: keyword-index
+          path: vscode-extension/data/keyword_index_compact.json
+          if-no-files-found: error
+
+  package:
+    needs: build-index
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: vscode-extension
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Download freshly built keyword index
+        uses: actions/download-artifact@v8
+        with:
+          name: keyword-index
+          path: vscode-extension/data
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile TypeScript
+        run: npm run compile
+
+      - name: Package VSIX
+        run: npx --yes @vscode/vsce package
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: opm-flow-vsix
+          path: vscode-extension/opm-flow-editor-support-*.vsix
+          if-no-files-found: error
+
+      - name: Attach VSIX to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: vscode-extension/opm-flow-editor-support-*.vsix
+
+  # Disabled until Open VSX account + OVSX_PAT secret are set up.
+  # To re-enable: change `if: false` back to `if: startsWith(github.ref, 'refs/tags/v')`.
+  publish-ovsx:
+    needs: package
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Download VSIX
+        uses: actions/download-artifact@v8
+        with:
+          name: opm-flow-vsix
+          path: .
+
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx --yes ovsx publish opm-flow-editor-support-*.vsix -p "$OVSX_PAT"

@@ -1,5 +1,5 @@
 {
-  "name": "opm-flow",
+  "name": "opm-flow-editor-support",
   "displayName": "OPM Flow",
   "description": "Language support for OPM Flow reservoir simulation deck files",
   "version": "0.6.0",
