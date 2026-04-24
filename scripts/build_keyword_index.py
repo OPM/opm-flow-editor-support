@@ -34,15 +34,19 @@ NS = {
 }
 
 # Subsection number → OPM Flow deck section name
+# Subsection 4.3 holds the "global" keywords (INCLUDE, ECHO, END, …) that are
+# valid in every section. Those keyword files are also duplicated into each
+# per-section subdirectory (5.3–12.3), so the multi-section merge picks up
+# their full section set from there and 4.3 is skipped.
 SECTION_MAP = {
-    "4.3":  "RUNSPEC",
-    "5.3":  "GRID",
-    "6.3":  "EDIT",
-    "7.3":  "PROPS",
-    "8.3":  "REGIONS",
-    "9.3":  "SOLUTION",
-    "10.3": "SUMMARY",
-    "11.3": "SCHEDULE",
+    "5.3":  "RUNSPEC",
+    "6.3":  "GRID",
+    "7.3":  "EDIT",
+    "8.3":  "PROPS",
+    "9.3":  "REGIONS",
+    "10.3": "SOLUTION",
+    "11.3": "SUMMARY",
+    "12.3": "SCHEDULE",
 }
 
 # Paragraph style names that indicate a heading in the OPM manual
