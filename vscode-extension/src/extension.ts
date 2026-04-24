@@ -12,10 +12,9 @@ interface Parameter {
 
 interface KeywordEntry {
   name: string;
-  section: string;
+  sections: string[];
   supported: boolean | null;
   summary: string;
-  description: string;
   parameters: Parameter[];
   example: string;
 }
@@ -156,6 +155,7 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
       overflow-x: auto;
     }
     .placeholder { color: var(--vscode-descriptionForeground); font-style: italic; margin-top: 20px; }
+    .sections { color: var(--vscode-descriptionForeground); font-size: 0.9em; margin: 0 0 8px 0; }
   `;
 
   if (!entry) {
@@ -186,16 +186,15 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
     ? `<h2>Example</h2><pre>${escHtml(entry.example)}</pre>`
     : '';
 
-  const descHtml = entry.description
-    ? `<p>${escHtml(entry.description)}</p>`
-    : (entry.summary ? `<p>${escHtml(entry.summary)}</p>` : '');
+  const summaryHtml = entry.summary ? `<p>${escHtml(entry.summary)}</p>` : '';
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
     <style>${css}</style></head>
     <body>
       <h1><code>${escHtml(entry.name)}</code></h1>
-      ${descHtml}
+      <p class="sections">Section${entry.sections.length > 1 ? 's' : ''}: ${escHtml(entry.sections.join(', '))}</p>
+      ${summaryHtml}
       ${paramsHtml}
       ${exampleHtml}
     </body></html>`;
@@ -234,11 +233,8 @@ function buildKeywordHover(entry: KeywordEntry): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
   md.isTrusted = true;
 
-  md.appendMarkdown(`## \`${entry.name}\` — ${entry.section}\n\n`);
+  md.appendMarkdown(`## \`${entry.name}\` — ${entry.sections.join(', ')}\n\n`);
   if (entry.summary) md.appendMarkdown(`${entry.summary}\n\n`);
-  if (entry.description && entry.description !== entry.summary) {
-    md.appendMarkdown(`${entry.description}\n\n`);
-  }
   appendParameterTable(md, entry.parameters);
   if (entry.example) md.appendMarkdown(`**Example**\n\`\`\`\n${entry.example}\n\`\`\`\n`);
   return md;
@@ -713,7 +709,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return keywords.map((kw) => {
           const entry = index[kw];
           const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword);
-          item.detail = `[${entry.section}] OPM Flow`;
+          item.detail = `[${entry.sections.join(', ')}] OPM Flow`;
           if (entry.summary) item.documentation = new vscode.MarkdownString(entry.summary);
           return item;
         });
@@ -749,8 +745,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const generateReferenceCommand = vscode.commands.registerCommand('opm-flow.generateKeywordReference', async () => {
     const bySection: Record<string, KeywordEntry[]> = {};
     for (const entry of Object.values(index)) {
-      if (!bySection[entry.section]) bySection[entry.section] = [];
-      bySection[entry.section].push(entry);
+      for (const sec of entry.sections) {
+        if (!bySection[sec]) bySection[sec] = [];
+        bySection[sec].push(entry);
+      }
     }
     const lines: string[] = ['# OPM Flow Keyword Reference\n'];
     for (const sec of SECTION_KEYWORDS) {

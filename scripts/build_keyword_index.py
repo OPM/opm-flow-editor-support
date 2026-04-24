@@ -471,18 +471,23 @@ def write_compact_json(index: dict, output_path: Path):
     compact = {}
     for name, entry in index.items():
         if isinstance(entry, list):
-            entry = entry[0]
-        desc = entry.get("description", "")
-        first_para = desc.split("\n\n")[0][:600] if desc else ""
-        examples = entry.get("examples", [])
+            sections = [e["section"] for e in entry]
+            primary = entry[0]
+        else:
+            sections = [entry["section"]]
+            primary = entry
+        examples = primary.get("examples", [])
         example_text = "\n".join(e for e in examples if isinstance(e, str))[:4000]
+        summary = primary.get("summary", "")
+        SUMMARY_LIMIT = 1000
+        if len(summary) > SUMMARY_LIMIT:
+            summary = summary[:SUMMARY_LIMIT].rstrip() + "..."
         compact[name] = {
-            "name":        entry["name"],
-            "section":     entry["section"],
-            "supported":   entry["supported"],
-            "summary":     entry.get("summary", "")[:200],
-            "description": first_para,
-            "parameters":  entry.get("parameters", []),
+            "name":        primary["name"],
+            "sections":    sections,
+            "supported":   primary["supported"],
+            "summary":     summary,
+            "parameters":  primary.get("parameters", []),
             "example":     example_text,
         }
     with open(output_path, "w", encoding="utf-8") as f:
@@ -497,14 +502,18 @@ def write_summary_tsv(index: dict, output_path: Path):
     Useful for quick loading in the LSP server without parsing full JSON.
     """
     with open(output_path, "w", encoding="utf-8") as f:
-        f.write("keyword\tsection\tsupported\tparam_count\tsummary\n")
+        f.write("keyword\tsections\tsupported\tparam_count\tsummary\n")
         for name, entry in sorted(index.items()):
             if isinstance(entry, list):
-                entry = entry[0]  # primary entry for duplicates
-            supported  = {True: "yes", False: "no", None: "unknown"}[entry["supported"]]
-            summary    = entry["summary"].replace("\t", " ").replace("\n", " ")[:120]
-            param_count = len(entry["parameters"]) if isinstance(entry["parameters"], list) else 0
-            f.write(f"{name}\t{entry['section']}\t{supported}\t{param_count}\t{summary}\n")
+                sections = ",".join(e["section"] for e in entry)
+                primary = entry[0]
+            else:
+                sections = entry["section"]
+                primary = entry
+            supported  = {True: "yes", False: "no", None: "unknown"}[primary["supported"]]
+            summary    = primary["summary"].replace("\t", " ").replace("\n", " ")[:120]
+            param_count = len(primary["parameters"]) if isinstance(primary["parameters"], list) else 0
+            f.write(f"{name}\t{sections}\t{supported}\t{param_count}\t{summary}\n")
     print(f"Wrote summary TSV: {output_path}")
 
 
