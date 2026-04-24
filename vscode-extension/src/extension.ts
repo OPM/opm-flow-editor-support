@@ -546,6 +546,65 @@ function computeAlignEdits(document: vscode.TextDocument, range?: vscode.Range):
 }
 
 // ---------------------------------------------------------------------------
+// Folding range provider
+// ---------------------------------------------------------------------------
+
+const SECTION_KEYWORDS = [
+  'RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS',
+  'SOLUTION', 'SUMMARY', 'SCHEDULE', 'OPTIMIZE'
+] as const;
+const SECTION_KEYWORD_SET: ReadonlySet<string> = new Set(SECTION_KEYWORDS);
+
+class OpmFlowFoldingRangeProvider implements vscode.FoldingRangeProvider {
+  provideFoldingRanges(document: vscode.TextDocument): vscode.FoldingRange[] {
+    const ranges: vscode.FoldingRange[] = [];
+    let sectionStart = -1;
+    let keywordStart = -1;
+
+    const pushRange = (start: number, end: number) => {
+      if (start >= 0 && end > start) {
+        ranges.push(new vscode.FoldingRange(start, end, vscode.FoldingRangeKind.Region));
+      }
+    };
+
+    for (let i = 0; i < document.lineCount; i++) {
+      const text = document.lineAt(i).text;
+      if (text.trim().startsWith('--')) continue;
+
+      const m = text.match(KEYWORD_LINE_RE);
+      if (!m) continue;
+
+      const kw = m[1];
+      const prevEnd = i - 1;
+
+      if (kw === 'END') {
+        pushRange(keywordStart, prevEnd);
+        pushRange(sectionStart, prevEnd);
+        keywordStart = -1;
+        sectionStart = -1;
+        continue;
+      }
+
+      if (SECTION_KEYWORD_SET.has(kw)) {
+        pushRange(keywordStart, prevEnd);
+        pushRange(sectionStart, prevEnd);
+        keywordStart = -1;
+        sectionStart = i;
+      } else {
+        pushRange(keywordStart, prevEnd);
+        keywordStart = i;
+      }
+    }
+
+    const lastLine = document.lineCount - 1;
+    pushRange(keywordStart, lastLine);
+    pushRange(sectionStart, lastLine);
+
+    return ranges;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // INCLUDE file link provider
 // ---------------------------------------------------------------------------
 
@@ -688,14 +747,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // --- Command: generate keyword reference ---
   const generateReferenceCommand = vscode.commands.registerCommand('opm-flow.generateKeywordReference', async () => {
-    const sections = ['RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS', 'SOLUTION', 'SUMMARY', 'SCHEDULE', 'OPTIMIZE'];
     const bySection: Record<string, KeywordEntry[]> = {};
     for (const entry of Object.values(index)) {
       if (!bySection[entry.section]) bySection[entry.section] = [];
       bySection[entry.section].push(entry);
     }
     const lines: string[] = ['# OPM Flow Keyword Reference\n'];
-    for (const sec of sections) {
+    for (const sec of SECTION_KEYWORDS) {
       const entries = bySection[sec];
       if (!entries) continue;
       lines.push(`## ${sec}\n`);
@@ -800,7 +858,13 @@ export function activate(context: vscode.ExtensionContext): void {
     new IncludeLinkProvider()
   );
 
-  context.subscriptions.push(completionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, includeLinkProvider);
+  // --- Folding range provider ---
+  const foldingProvider = vscode.languages.registerFoldingRangeProvider(
+    'opm-flow',
+    new OpmFlowFoldingRangeProvider()
+  );
+
+  context.subscriptions.push(completionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, includeLinkProvider, foldingProvider);
 }
 
 export function deactivate(): void {}
