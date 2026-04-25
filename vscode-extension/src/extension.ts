@@ -1,6 +1,21 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  Token,
+  tokenizeLine,
+  columnAtCursor,
+  RecordLine,
+  parseRecordLine,
+  isCommentLine,
+  NUMERIC_TOKEN_RE,
+  KEYWORD_TOKEN_RE,
+  formatRecordGroup,
+  parseHeadingPositions,
+  formatRecordGroupWithHeading,
+  buildHeadingAndAlignedRecords,
+  tokenColumnCount,
+} from './formatting';
 
 interface Parameter {
   index: number | string;
@@ -34,58 +49,6 @@ function loadKeywordIndex(context: vscode.ExtensionContext): KeywordIndex {
     console.error('OPM Flow: failed to load keyword index', e);
     return {};
   }
-}
-
-// ---------------------------------------------------------------------------
-// Record tokenizer
-// ---------------------------------------------------------------------------
-
-interface Token {
-  text: string;
-  start: number;
-  end: number;
-  columnCount: number;
-}
-
-function tokenizeLine(line: string): Token[] {
-  const tokens: Token[] = [];
-  let i = 0;
-  while (i < line.length) {
-    while (i < line.length && /\s/.test(line[i])) i++;
-    if (i >= line.length) break;
-    if (line[i] === '-' && line[i + 1] === '-') break;
-    if (line[i] === '/') break;
-
-    const start = i;
-    let text: string;
-
-    if (line[i] === "'") {
-      let j = i + 1;
-      while (j < line.length && line[j] !== "'") j++;
-      text = line.substring(i, j + 1);
-      i = j + 1;
-    } else {
-      let j = i;
-      while (j < line.length && !/[\s/]/.test(line[j])) j++;
-      text = line.substring(i, j);
-      i = j;
-    }
-
-    const repeatMatch = text.match(/^(\d+)\*$/);
-    const columnCount = repeatMatch ? parseInt(repeatMatch[1]) : 1;
-    tokens.push({ text, start, end: i, columnCount });
-  }
-  return tokens;
-}
-
-function columnAtCursor(line: string, cursorChar: number): number {
-  const tokens = tokenizeLine(line);
-  let col = 1;
-  for (const tok of tokens) {
-    if (cursorChar >= tok.start && cursorChar < tok.end) return col;
-    col += tok.columnCount;
-  }
-  return -1;
 }
 
 // ---------------------------------------------------------------------------
@@ -270,186 +233,6 @@ function appendParameterTable(md: vscode.MarkdownString, parameters: Parameter[]
     }
   }
   md.appendMarkdown('\n');
-}
-
-// ---------------------------------------------------------------------------
-// Record-column alignment
-// ---------------------------------------------------------------------------
-
-const NUMERIC_TOKEN_RE = /^(\*|\d+\*|[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?)$/;
-
-interface RecordLine {
-  indent: string;
-  tokens: string[];
-  trailComment: string;
-  hasTerminator: boolean;
-}
-
-const KEYWORD_TOKEN_RE = /^[A-Z][A-Z0-9_+-]*$/;
-
-function parseRecordLine(line: string): RecordLine | null {
-  const indent = line.match(/^[ \t]*/)![0];
-  let i = indent.length;
-  const tokens: string[] = [];
-  let hasTerminator = false;
-
-  while (i < line.length) {
-    while (i < line.length && (line[i] === ' ' || line[i] === '\t')) i++;
-    if (i >= line.length) break;
-    if (line[i] === '-' && line[i + 1] === '-') break;
-    if (line[i] === '/') { hasTerminator = true; break; }
-
-    const start = i;
-    if (line[i] === "'") {
-      i++;
-      while (i < line.length && line[i] !== "'") i++;
-      if (i < line.length) i++;
-      tokens.push(line.substring(start, i));
-    } else {
-      while (i < line.length) {
-        const c = line[i];
-        if (c === ' ' || c === '\t' || c === '/') break;
-        if (c === '-' && line[i + 1] === '-') break;
-        i++;
-      }
-      tokens.push(line.substring(start, i));
-    }
-  }
-
-  if (tokens.length === 0) return null;
-
-  if (hasTerminator) {
-    i++;
-  } else if (tokens.length === 1 && KEYWORD_TOKEN_RE.test(tokens[0])) {
-    // A lone uppercase identifier on a line is a keyword declaration, not a record.
-    return null;
-  }
-
-  const rest = line.substring(i).replace(/^[ \t]+/, '').trimEnd();
-  if (rest && !rest.startsWith('--')) return null;
-  return { indent, tokens, trailComment: rest, hasTerminator };
-}
-
-function isCommentLine(line: string): boolean {
-  return /^\s*--/.test(line);
-}
-
-function formatRecordGroup(records: RecordLine[]): string[] {
-  const nCols = records[0].tokens.length;
-  const widths = new Array(nCols).fill(0);
-  const numeric = new Array(nCols).fill(true);
-  for (const r of records) {
-    for (let c = 0; c < nCols; c++) {
-      const t = r.tokens[c];
-      if (t.length > widths[c]) widths[c] = t.length;
-      if (!NUMERIC_TOKEN_RE.test(t)) numeric[c] = false;
-    }
-  }
-  const groupIndent = records[0].indent;
-  return records.map(r => {
-    const cells = r.tokens.map((t, c) =>
-      numeric[c] ? t.padStart(widths[c]) : t.padEnd(widths[c])
-    );
-    const body = groupIndent + cells.join(' ') + (r.hasTerminator ? ' /' : '');
-    return r.trailComment ? `${body} ${r.trailComment}` : body;
-  });
-}
-
-// Parse absolute char positions of each word in a heading comment line (-- word1 word2 ...)
-function parseHeadingPositions(line: string): number[] | null {
-  const m = line.match(/^(\s*--\s*)(.*)/);
-  if (!m) return null;
-  const offset = m[1].length;
-  const rest = m[2];
-  if (!rest.trim()) return null;
-  const positions: number[] = [];
-  let i = 0;
-  while (i < rest.length) {
-    while (i < rest.length && rest[i] === ' ') i++;
-    if (i >= rest.length) break;
-    positions.push(offset + i);
-    while (i < rest.length && rest[i] !== ' ') i++;
-  }
-  return positions.length >= 2 ? positions : null;
-}
-
-// Format a record group aligning columns to heading word positions
-function formatRecordGroupWithHeading(records: RecordLine[], headingPositions: number[]): string[] {
-  const nCols = records[0].tokens.length;
-  const maxWidth: number[] = new Array(nCols).fill(0);
-  const numeric: boolean[] = new Array(nCols).fill(true);
-  for (const r of records) {
-    for (let c = 0; c < nCols; c++) {
-      const t = r.tokens[c] ?? '';
-      if (t.length > maxWidth[c]) maxWidth[c] = t.length;
-      if (!NUMERIC_TOKEN_RE.test(t)) numeric[c] = false;
-    }
-  }
-  // Compute actual column start positions; heading defines the minimum start
-  const colStart: number[] = new Array(nCols).fill(0);
-  colStart[0] = headingPositions[0] ?? 0;
-  for (let c = 1; c < nCols; c++) {
-    const prevEnd = colStart[c - 1] + maxWidth[c - 1];
-    const fromHeading = headingPositions[c] ?? (prevEnd + 1);
-    colStart[c] = Math.max(fromHeading, prevEnd + 1);
-  }
-  return records.map(r => {
-    let line = '';
-    for (let c = 0; c < nCols; c++) {
-      const t = r.tokens[c];
-      // numeric: right-align end to colStart[c] + maxWidth[c]; string: left-align to colStart[c]
-      const pos = numeric[c] ? colStart[c] + maxWidth[c] - t.length : colStart[c];
-      while (line.length < pos) line += ' ';
-      line += t;
-    }
-    line = line.trimEnd() + (r.hasTerminator ? ' /' : '');
-    return r.trailComment ? `${line} ${r.trailComment}` : line;
-  });
-}
-
-// Build a heading comment and consistently aligned records in one pass
-function buildHeadingAndAlignedRecords(
-  records: RecordLine[],
-  names: string[]
-): { heading: string; formattedRecords: string[] } {
-  const nCols = records[0].tokens.length;
-  const dataWidths: number[] = new Array(nCols).fill(0);
-  const numeric: boolean[] = new Array(nCols).fill(true);
-  for (const r of records) {
-    for (let c = 0; c < nCols; c++) {
-      const t = r.tokens[c] ?? '';
-      if (t.length > dataWidths[c]) dataWidths[c] = t.length;
-      if (!NUMERIC_TOKEN_RE.test(t)) numeric[c] = false;
-    }
-  }
-  // Effective column width = max of data width and heading name width
-  const colWidths = dataWidths.map((w, c) => Math.max(w, names[c]?.length ?? 0));
-  // Column start positions
-  const baseIndent = records[0].indent.length;
-  const colStarts: number[] = [baseIndent];
-  for (let c = 1; c < nCols; c++) {
-    colStarts[c] = colStarts[c - 1] + colWidths[c - 1] + 1;
-  }
-  // Build heading line — ensure at least one space before each name
-  let heading = '--';
-  for (let c = 0; c < nCols; c++) {
-    const target = Math.max(colStarts[c], heading.length + 1);
-    while (heading.length < target) heading += ' ';
-    heading += names[c] ?? '';
-  }
-  // Build aligned record lines
-  const formattedRecords = records.map(r => {
-    let line = '';
-    for (let c = 0; c < nCols; c++) {
-      const t = r.tokens[c];
-      const pos = numeric[c] ? colStarts[c] + colWidths[c] - t.length : colStarts[c];
-      while (line.length < pos) line += ' ';
-      line += t;
-    }
-    line = line.trimEnd() + (r.hasTerminator ? ' /' : '');
-    return r.trailComment ? `${line} ${r.trailComment}` : line;
-  });
-  return { heading, formattedRecords };
 }
 
 // Find the contiguous record group that contains (or is nearest to) the given line.
@@ -793,11 +576,14 @@ export function activate(context: vscode.ExtensionContext): void {
     const groupStartLine = groupLines[0];
     const kwName = findActiveKeyword(doc, new vscode.Position(groupStartLine, 0));
     const entry = kwName ? index[kwName] : undefined;
-    const nCols = group[0].tokens.length;
+    const tokens = group[0].tokens;
+    const nCols = tokens.length;
     const names: string[] = [];
-    for (let c = 0; c < nCols; c++) {
-      const param = entry?.parameters.find(p => Number(p.index) === c + 1);
-      names.push(param?.name ?? `COL${c + 1}`);
+    let paramIdx = 1;
+    for (const tok of tokens) {
+      const param = entry?.parameters.find(p => Number(p.index) === paramIdx);
+      names.push(param?.name ?? `COL${paramIdx}`);
+      paramIdx += tokenColumnCount(tok);
     }
     const prevLineIdx = groupStartLine - 1;
     const hasHeading = prevLineIdx >= 0 && /^\s*--/.test(doc.lineAt(prevLineIdx).text);
