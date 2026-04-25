@@ -133,12 +133,31 @@
     "vscode:prepublish": "npm run sync-manual-ref && npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "test": "jest",
     "build-index": "py ../scripts/build_keyword_index.py --manual-dir ../opm-reference-manual --output data/keyword_index.json --compact data/keyword_index_compact.json",
     "sync-manual-ref": "node scripts/sync-manual-ref.js README.md"
   },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": ["**/src/**/*.test.ts"],
+    "transform": {
+      "^.+\\.tsx?$": ["ts-jest", {
+        "tsconfig": {
+          "module": "commonjs",
+          "target": "ES2020",
+          "strict": true,
+          "esModuleInterop": true,
+          "types": ["jest", "node"]
+        }
+      }]
+    }
+  },
   "devDependencies": {
-    "@types/vscode": "^1.74.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "18.x",
+    "@types/vscode": "^1.74.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.9",
     "typescript": "^5.0.0"
   }
 }

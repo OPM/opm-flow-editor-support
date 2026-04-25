@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r scripts/requirements.txt
 
+      - name: Run Python tests
+        run: pytest scripts/
+
       - name: Build keyword index
         run: |
           python scripts/build_keyword_index.py \
@@ -69,6 +72,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Run tests
+        run: npm test
 
       - name: Compile TypeScript
         run: npm run compile
