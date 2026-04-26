@@ -127,6 +127,26 @@
           "group": "opm-flow"
         }
       ]
+    },
+    "configuration": {
+      "title": "OPM Flow",
+      "properties": {
+        "opm-flow.units.showField": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Field unit column in the keyword docs sidebar and hover tooltips."
+        },
+        "opm-flow.units.showMetric": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Metric unit column in the keyword docs sidebar and hover tooltips."
+        },
+        "opm-flow.units.showLab": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Laboratory unit column in the keyword docs sidebar and hover tooltips."
+        }
+      }
     }
   },
   "scripts": {
