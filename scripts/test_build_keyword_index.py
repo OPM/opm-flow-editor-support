@@ -712,7 +712,17 @@ class TestSynthesizeOpmOnly:
         opm = {"BARE": {"sections": ["RUNSPEC"], "items": []}}
         synthesize_opm_only_entries(index, opm)
         assert index["BARE"]["parameters"] == []
-        assert index["BARE"]["expected_columns"] is None
+        # No items → expected_columns omitted (rather than stored as None)
+        assert "expected_columns" not in index["BARE"]
+
+    def test_synthesized_entry_with_no_sections_keeps_empty_list(self):
+        # An opm-common entry with no sections (e.g. section-header keywords)
+        # should not be silently relabelled to RUNSPEC.
+        index: dict = {}
+        opm = {"MYSTERY": {"sections": [], "items": [{"name": "X"}]}}
+        synthesize_opm_only_entries(index, opm)
+        assert index["MYSTERY"]["sections_opm"] == []
+        assert index["MYSTERY"]["section"] == ""
 
 
 class TestExtractStringOptions:

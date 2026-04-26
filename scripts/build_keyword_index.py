@@ -207,7 +207,7 @@ def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
     for name, opm in opm_common_index.items():
         if name in index:
             continue
-        sections = opm["sections"] or ["RUNSPEC"]
+        sections = list(opm["sections"])
         items = opm["items"]
         params: list[dict] = []
         for i, it in enumerate(items):
@@ -224,10 +224,11 @@ def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
                 p["dimension"] = it["dimension"]
             params.append(p)
 
-        index[name] = {
+        entry = {
             "name":        name,
-            "section":     sections[0],
-            "sections_opm": list(sections),
+            # Empty list means "section unknown" — no validity check fires.
+            "section":     sections[0] if sections else "",
+            "sections_opm": sections,
             "supported":   True,
             "summary":     "(OPM Flow keyword — no reference-manual entry)",
             "description": "",
@@ -235,8 +236,10 @@ def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
             "examples":    [],
             "full_text":   "",
             "source_file": "",
-            "expected_columns": len(items) if items else None,
         }
+        if items:
+            entry["expected_columns"] = len(items)
+        index[name] = entry
         added += 1
     print(f"Synthesized {added} OPM-only entries")
     return added
@@ -694,10 +697,21 @@ def write_compact_json(index: dict, output_path: Path):
     for name, entry in index.items():
         if isinstance(entry, list):
             primary = entry[0]
-            sections = primary.get("sections_opm") or [e["section"] for e in entry]
+            # When opm-common merge ran, sections_opm is the authoritative list
+            # (and may legitimately be empty for synthesized OPM-only keywords
+            # whose section is unknown). Otherwise fall back to per-entry
+            # manual sections.
+            if "sections_opm" in primary:
+                sections = list(primary["sections_opm"])
+            else:
+                sections = [e["section"] for e in entry if e.get("section")]
         else:
             primary = entry
-            sections = entry.get("sections_opm") or [entry["section"]]
+            if "sections_opm" in primary:
+                sections = list(primary["sections_opm"])
+            else:
+                sec = primary.get("section", "")
+                sections = [sec] if sec else []
         examples = primary.get("examples", [])
         example_text = "\n".join(e for e in examples if isinstance(e, str))[:4000]
         summary = primary.get("summary", "")

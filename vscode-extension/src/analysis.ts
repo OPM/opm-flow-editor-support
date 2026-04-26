@@ -4,8 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import {
-  tokenColumnCount,
-  parseRecordLine,
+  tokenizeLine,
   isCommentLine,
   KEYWORD_LINE_RE,
   SECTION_KEYWORD_SET,
@@ -58,7 +57,9 @@ export function computeDiagnostics(
 
       if (SECTION_KEYWORD_SET.has(kw)) {
         currentSection = kw;
-        activeKw = index[kw] ?? null;
+        // Section headers don't own records, so don't let an entry that
+        // happens to carry expected_columns leak into the arity check below.
+        activeKw = null;
         continue;
       }
 
@@ -84,16 +85,22 @@ export function computeDiagnostics(
 
     // Arity check on record lines
     if (!activeKw || !activeKw.expected_columns) continue;
-    const rec = parseRecordLine(text);
-    if (!rec) continue;
+    const tokens = tokenizeLine(text);
+    if (tokens.length === 0) continue;
 
     let total = 0;
-    for (const t of rec.tokens) total += tokenColumnCount(t);
+    let overflowStart = -1;
+    for (const tok of tokens) {
+      if (overflowStart === -1 && total + tok.columnCount > activeKw.expected_columns) {
+        overflowStart = tok.start;
+      }
+      total += tok.columnCount;
+    }
     if (total > activeKw.expected_columns) {
       out.push({
         line: i,
-        startChar: 0,
-        endChar: text.length,
+        startChar: overflowStart,
+        endChar: tokens[tokens.length - 1].end,
         message:
           `${activeKw.name}: record has ${total} values; expected at most ${activeKw.expected_columns}.`,
       });

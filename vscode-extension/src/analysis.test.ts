@@ -35,6 +35,19 @@ describe('computeDiagnostics — arity', () => {
     expect(diags[0].message).toMatch(/ACTDIMS/);
     expect(diags[0].message).toMatch(/5 values/);
     expect(diags[0].message).toMatch(/at most 4/);
+    // Range pins to the offending token, not the whole line
+    expect(diags[0].startChar).toBe('1 2 3 4 '.length);
+    expect(diags[0].endChar).toBe('1 2 3 4 5'.length);
+  });
+
+  it('pins overflow range to the first offending N* token', () => {
+    // ACTDIMS expected=4; "1 4* 5 /" yields 1 + 4 + 1 = 6 columns.
+    // The 4* itself drives total to 5, so the overflow starts there.
+    const lines = ['RUNSPEC', 'ACTDIMS', '1 4* 5 /'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].startChar).toBe('1 '.length);
+    expect(diags[0].endChar).toBe('1 4* 5'.length);
   });
 
   it('does not flag records with fewer values (auto-defaulted)', () => {
@@ -56,6 +69,19 @@ describe('computeDiagnostics — arity', () => {
   it('skips keywords without expected_columns', () => {
     const lines = ['RUNSPEC', 'BARE', '1 2 3 4 5 6 7 8 /'];
     expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('does not treat a section header as a record-owning keyword', () => {
+    // If a section keyword's index entry happens to carry expected_columns,
+    // records that follow it must not be checked against that arity.
+    const sectionWithArity: Record<string, AnalysisEntry> = {
+      ...index,
+      RUNSPEC: { name: 'RUNSPEC', expected_columns: 2, sections: [] },
+      ACTDIMS: index.ACTDIMS,
+    };
+    // No active record-owning keyword between RUNSPEC and the record line.
+    const lines = ['RUNSPEC', '1 2 3 4 5 /'];
+    expect(computeDiagnostics(lines, sectionWithArity)).toEqual([]);
   });
 
   it('ignores comment lines and blank lines between records', () => {
