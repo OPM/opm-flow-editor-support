@@ -131,6 +131,11 @@
     "configuration": {
       "title": "OPM Flow",
       "properties": {
+        "opm-flow.columns.showType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Type column (parameter value type and dimension) in the keyword docs sidebar and hover tooltips."
+        },
         "opm-flow.units.showField": {
           "type": "boolean",
           "default": true,
@@ -145,6 +150,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show the Laboratory unit column in the keyword docs sidebar and hover tooltips."
+        },
+        "opm-flow.columns.showDefault": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Default column in the keyword docs sidebar and hover tooltips."
         }
       }
     }

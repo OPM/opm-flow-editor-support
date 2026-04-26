@@ -113,25 +113,30 @@ function nonce(): string {
   return crypto.randomBytes(8).toString('hex');
 }
 
-interface UnitColumns {
+interface DocColumns {
+  type: boolean;
   field: boolean;
   metric: boolean;
   lab: boolean;
+  default: boolean;
 }
 
-function getUnitColumns(): UnitColumns {
-  const cfg = vscode.workspace.getConfiguration('opm-flow.units');
+function getDocColumns(): DocColumns {
+  const u = vscode.workspace.getConfiguration('opm-flow.units');
+  const c = vscode.workspace.getConfiguration('opm-flow.columns');
   return {
-    field: cfg.get<boolean>('showField', true),
-    metric: cfg.get<boolean>('showMetric', true),
-    lab: cfg.get<boolean>('showLab', true),
+    type:    c.get<boolean>('showType', true),
+    field:   u.get<boolean>('showField', true),
+    metric:  u.get<boolean>('showMetric', true),
+    lab:     u.get<boolean>('showLab', true),
+    default: c.get<boolean>('showDefault', true),
   };
 }
 
 function buildDocsHtml(
   entry: KeywordEntry | null,
   highlightParam: Parameter | null,
-  units: UnitColumns,
+  cols: DocColumns,
 ): string {
   const css = `
     body {
@@ -187,27 +192,30 @@ function buildDocsHtml(
 
   let paramsHtml = '';
   if (entry.parameters && entry.parameters.length > 0) {
-    const showField  = units.field  && entry.parameters.some(p => p.units?.field);
-    const showMetric = units.metric && entry.parameters.some(p => p.units?.metric);
-    const showLab    = units.lab    && entry.parameters.some(p => p.units?.laboratory);
-    const hasType  = paramTypes.some(t => t.length > 0);
+    const showField   = cols.field   && entry.parameters.some(p => p.units?.field);
+    const showMetric  = cols.metric  && entry.parameters.some(p => p.units?.metric);
+    const showLab     = cols.lab     && entry.parameters.some(p => p.units?.laboratory);
+    const showType    = cols.type    && paramTypes.some(t => t.length > 0);
+    const showDefault = cols.default;
     const unitCols =
       (showField  ? '<th>Field</th>'  : '') +
       (showMetric ? '<th>Metric</th>' : '') +
       (showLab    ? '<th>Lab</th>'    : '');
-    const typeCol  = hasType ? '<th>Type</th>' : '';
+    const typeCol    = showType    ? '<th>Type</th>'    : '';
+    const defaultCol = showDefault ? '<th>Default</th>' : '';
     const rows = entry.parameters.map((p, idx) => {
       const u = p.units ?? {};
       const unitCells =
         (showField  ? `<td>${escWithBreaks(u.field ?? '')}</td>`      : '') +
         (showMetric ? `<td>${escWithBreaks(u.metric ?? '')}</td>`     : '') +
         (showLab    ? `<td>${escWithBreaks(u.laboratory ?? '')}</td>` : '');
-      const typeCell  = hasType ? `<td>${escWithBreaks(paramTypes[idx])}</td>` : '';
+      const typeCell    = showType    ? `<td>${escWithBreaks(paramTypes[idx])}</td>` : '';
+      const defaultCell = showDefault ? `<td>${escHtml(p.default)}</td>`              : '';
       const hl = highlightParam && highlightParam.index === p.index ? ' class="highlight"' : '';
-      return `<tr data-param-index="${escHtml(String(p.index))}"${hl}><td>${p.index}</td><td><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${typeCell}${unitCells}<td>${escHtml(p.default)}</td></tr>`;
+      return `<tr data-param-index="${escHtml(String(p.index))}"${hl}><td>${p.index}</td><td><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${typeCell}${unitCells}${defaultCell}</tr>`;
     }).join('');
     paramsHtml = `<h2>Parameters</h2>
-      <table><thead><tr><th>No.</th><th>Name</th><th>Description</th>${typeCol}${unitCols}<th>Default</th></tr></thead>
+      <table><thead><tr><th>No.</th><th>Name</th><th>Description</th>${typeCol}${unitCols}${defaultCol}</tr></thead>
       <tbody>${rows}</tbody></table>`;
   }
 
@@ -266,7 +274,7 @@ class DocsViewProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(view: vscode.WebviewView): void {
     this._view = view;
     view.webview.options = { enableScripts: true };
-    view.webview.html = buildDocsHtml(null, null, getUnitColumns());
+    view.webview.html = buildDocsHtml(null, null, getDocColumns());
     this._currentEntry = undefined;
     this._currentParam = undefined;
   }
@@ -284,19 +292,19 @@ class DocsViewProvider implements vscode.WebviewViewProvider {
       });
       return;
     }
-    this._view.webview.html = buildDocsHtml(entry, param ?? null, getUnitColumns());
+    this._view.webview.html = buildDocsHtml(entry, param ?? null, getDocColumns());
     this._currentEntry = entry;
     this._currentParam = param;
   }
 
   // Force a full HTML rebuild against the current entry — used when a setting
-  // that affects rendering (e.g. unit column visibility) changes.
+  // that affects column visibility changes.
   refresh(): void {
     if (!this._view) return;
     this._view.webview.html = buildDocsHtml(
       this._currentEntry ?? null,
       this._currentParam ?? null,
-      getUnitColumns(),
+      getDocColumns(),
     );
   }
 }
@@ -326,7 +334,7 @@ function buildKeywordHover(
   const sectionLabel = entry.sections.length ? ` — ${entry.sections.join(', ')}` : '';
   md.appendMarkdown(`## \`${entry.name}\`${sectionLabel}\n\n`);
   if (entry.summary) md.appendMarkdown(`${entry.summary}\n\n`);
-  appendParameterTable(md, entry.parameters, getUnitColumns());
+  appendParameterTable(md, entry.parameters, getDocColumns());
   if (entry.example) md.appendMarkdown(`**Example**\n\`\`\`\n${entry.example}\n\`\`\`\n`);
   return md;
 }
@@ -336,10 +344,10 @@ function buildParameterHover(entry: KeywordEntry, param: Parameter): vscode.Mark
   md.isTrusted = true;
   md.appendMarkdown(`**\`${entry.name}\` — parameter ${param.index}: \`${param.name}\`**\n\n`);
   md.appendMarkdown(`${param.description}\n\n`);
+  const cols = getDocColumns();
   const typeLabel = paramTypeLabel(param);
-  if (typeLabel) md.appendMarkdown(`*Type: ${typeLabel}*\n\n`);
+  if (cols.type && typeLabel) md.appendMarkdown(`*Type: ${typeLabel}*\n\n`);
   const u = param.units ?? {};
-  const cols = getUnitColumns();
   const showField  = cols.field  && !!u.field;
   const showMetric = cols.metric && !!u.metric;
   const showLab    = cols.lab    && !!u.laboratory;
@@ -347,56 +355,51 @@ function buildParameterHover(entry: KeywordEntry, param: Parameter): vscode.Mark
     const headers: string[] = [];
     const seps: string[]    = [];
     const cells: string[]   = [];
-    if (showField)  { headers.push('Field');      seps.push('-------'); cells.push(u.field ?? ''); }
-    if (showMetric) { headers.push('Metric');     seps.push('--------'); cells.push(u.metric ?? ''); }
+    if (showField)  { headers.push('Field');      seps.push('-------');      cells.push(u.field ?? ''); }
+    if (showMetric) { headers.push('Metric');     seps.push('--------');     cells.push(u.metric ?? ''); }
     if (showLab)    { headers.push('Laboratory'); seps.push('------------'); cells.push(u.laboratory ?? ''); }
     md.appendMarkdown(`| ${headers.join(' | ')} |\n|${seps.join('|')}|\n`);
     md.appendMarkdown(`| ${cells.join(' | ')} |\n\n`);
   }
-  md.appendMarkdown(`*Default: ${param.default || '—'}*`);
+  if (cols.default) md.appendMarkdown(`*Default: ${param.default || '—'}*`);
   return md;
 }
 
 function appendParameterTable(
   md: vscode.MarkdownString,
   parameters: Parameter[],
-  units: UnitColumns,
+  cols: DocColumns,
 ): void {
   if (!parameters || parameters.length === 0) return;
   const types = parameters.map(paramTypeLabel);
-  const showField  = units.field  && parameters.some(p => p.units?.field);
-  const showMetric = units.metric && parameters.some(p => p.units?.metric);
-  const showLab    = units.lab    && parameters.some(p => p.units?.laboratory);
-  const hasAnyUnit = showField || showMetric || showLab;
-  const hasType  = types.some(t => t.length > 0);
-  const typeHead = hasType ? ' Type |' : '';
-  const typeSep  = hasType ? '------|' : '';
+  const showField   = cols.field   && parameters.some(p => p.units?.field);
+  const showMetric  = cols.metric  && parameters.some(p => p.units?.metric);
+  const showLab     = cols.lab     && parameters.some(p => p.units?.laboratory);
+  const showType    = cols.type    && types.some(t => t.length > 0);
+  const showDefault = cols.default;
+  const typeHead = showType ? ' Type |' : '';
+  const typeSep  = showType ? '------|' : '';
   const unitHead =
     (showField  ? ' Field |'  : '') +
     (showMetric ? ' Metric |' : '') +
     (showLab    ? ' Lab |'    : '');
   const unitSep =
-    (showField  ? '-------|' : '') +
+    (showField  ? '-------|'  : '') +
     (showMetric ? '--------|' : '') +
-    (showLab    ? '-----|'   : '');
-  if (hasAnyUnit) {
-    md.appendMarkdown(`**Parameters**\n\n| No. | Name | Description |${typeHead}${unitHead} Default |\n|-----|------|-------------|${typeSep}${unitSep}---------|\n`);
-    parameters.forEach((p, i) => {
-      const u = p.units || {};
-      const typeCell = hasType ? ` ${types[i]} |` : '';
-      const unitCells =
-        (showField  ? ` ${u.field ?? ''} |`      : '') +
-        (showMetric ? ` ${u.metric ?? ''} |`     : '') +
-        (showLab    ? ` ${u.laboratory ?? ''} |` : '');
-      md.appendMarkdown(`| ${p.index} | \`${p.name}\` | ${p.description} |${typeCell}${unitCells} ${p.default} |\n`);
-    });
-  } else {
-    md.appendMarkdown(`**Parameters**\n\n| No. | Name | Description |${typeHead} Default |\n|-----|------|-------------|${typeSep}---------|\n`);
-    parameters.forEach((p, i) => {
-      const typeCell = hasType ? ` ${types[i]} |` : '';
-      md.appendMarkdown(`| ${p.index} | \`${p.name}\` | ${p.description} |${typeCell} ${p.default} |\n`);
-    });
-  }
+    (showLab    ? '-----|'    : '');
+  const defaultHead = showDefault ? ' Default |'   : '';
+  const defaultSep  = showDefault ? '---------|'   : '';
+  md.appendMarkdown(`**Parameters**\n\n| No. | Name | Description |${typeHead}${unitHead}${defaultHead}\n|-----|------|-------------|${typeSep}${unitSep}${defaultSep}\n`);
+  parameters.forEach((p, i) => {
+    const u = p.units || {};
+    const typeCell = showType ? ` ${types[i]} |` : '';
+    const unitCells =
+      (showField  ? ` ${u.field ?? ''} |`      : '') +
+      (showMetric ? ` ${u.metric ?? ''} |`     : '') +
+      (showLab    ? ` ${u.laboratory ?? ''} |` : '');
+    const defaultCell = showDefault ? ` ${p.default} |` : '';
+    md.appendMarkdown(`| ${p.index} | \`${p.name}\` | ${p.description} |${typeCell}${unitCells}${defaultCell}\n`);
+  });
   md.appendMarkdown('\n');
 }
 
@@ -666,7 +669,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('opm-flow.units')) {
+      if (
+        e.affectsConfiguration('opm-flow.units') ||
+        e.affectsConfiguration('opm-flow.columns')
+      ) {
         docsProvider.refresh();
       }
     }),
