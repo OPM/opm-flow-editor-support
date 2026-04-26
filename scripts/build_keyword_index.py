@@ -24,6 +24,125 @@ from lxml import etree
 
 
 # ---------------------------------------------------------------------------
+# opm-common keyword JSON loader and merge
+# ---------------------------------------------------------------------------
+# opm-common is the OPM Flow parser's source-of-truth for which keywords are
+# accepted, which sections they're valid in, and the type/dimension of each
+# parameter. Each keyword lives in:
+#     opm/input/eclipse/share/keywords/{dialect}/{LETTER}/{KEYWORD}
+# where dialect is one of 000_Eclipse100, 001_Eclipse300, 002_Frontsim,
+# 900_OPM. The file is JSON with shape:
+#     { "name": ..., "sections": [...], "items": [{name, value_type,
+#       dimension?, default?, comment?, item?}, ...] }
+
+OPM_COMMON_DIALECTS = ("000_Eclipse100", "001_Eclipse300", "002_Frontsim", "900_OPM")
+
+
+def load_opm_common_index(keywords_dir: Path) -> dict:
+    """
+    Walk the opm-common keywords tree and return a dict keyed by keyword name.
+
+    Each value: {"sections": [...], "items": [...]}. If a keyword appears in
+    multiple dialect dirs (uncommon in practice), the first one wins.
+    """
+    if not keywords_dir.exists():
+        sys.exit(f"ERROR: opm-common keywords dir not found: {keywords_dir}")
+
+    out: dict[str, dict] = {}
+    total = 0
+    for dialect in OPM_COMMON_DIALECTS:
+        dialect_dir = keywords_dir / dialect
+        if not dialect_dir.exists():
+            continue
+        for letter_dir in sorted(p for p in dialect_dir.iterdir() if p.is_dir()):
+            for kw_file in sorted(letter_dir.iterdir()):
+                if not kw_file.is_file():
+                    continue
+                try:
+                    with open(kw_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except (OSError, json.JSONDecodeError) as e:
+                    print(f"  WARNING: failed to read {kw_file}: {e}", file=sys.stderr)
+                    continue
+                name = data.get("name") or kw_file.name
+                if name in out:
+                    continue
+                out[name] = {
+                    "sections": data.get("sections", []),
+                    "items":    data.get("items", []),
+                }
+                total += 1
+    print(f"Loaded {total} keywords from opm-common ({keywords_dir})")
+    return out
+
+
+def _opm_item_for_param(opm_items: list[dict], manual_index) -> Optional[dict]:
+    """
+    Return the opm-common item matching a manual parameter index.
+
+    manual_index is a 1-based int or a string like "1-2" (grouped record).
+    Match by explicit "item" field first, then by 1-based position.
+    """
+    if not opm_items:
+        return None
+    if isinstance(manual_index, int):
+        pos = manual_index
+    elif isinstance(manual_index, str):
+        try:
+            pos = int(manual_index.split("-")[0])
+        except ValueError:
+            return None
+    else:
+        return None
+
+    for it in opm_items:
+        if it.get("item") == pos:
+            return it
+    if 1 <= pos <= len(opm_items):
+        return opm_items[pos - 1]
+    return None
+
+
+def merge_opm_common(index: dict, opm_common_index: dict) -> None:
+    """
+    Mutate *index* in place, attaching opm-common authoritative data:
+
+    - sections: replaced with opm-common's list when non-empty
+    - parameters: each gets optional value_type and dimension copied from
+      the matching opm-common item
+
+    Manual entries that have no opm-common counterpart are left unchanged.
+    """
+    merged_sections = 0
+    merged_params = 0
+    for name, entry in index.items():
+        opm = opm_common_index.get(name)
+        if not opm:
+            continue
+        # Authoritative section list (skip when opm-common has none, e.g.
+        # section-header keywords like RUNSPEC).
+        if opm["sections"]:
+            entries = entry if isinstance(entry, list) else [entry]
+            for e in entries:
+                e["section"] = opm["sections"][0]
+                e["sections_opm"] = list(opm["sections"])
+            merged_sections += 1
+
+        # Per-parameter type/dimension
+        primary = entry[0] if isinstance(entry, list) else entry
+        for p in primary.get("parameters", []):
+            it = _opm_item_for_param(opm["items"], p.get("index"))
+            if not it:
+                continue
+            if "value_type" in it:
+                p["value_type"] = it["value_type"]
+            if "dimension" in it:
+                p["dimension"] = it["dimension"]
+            merged_params += 1
+    print(f"Merged opm-common: {merged_sections} keywords, {merged_params} parameters")
+
+
+# ---------------------------------------------------------------------------
 # ODF XML namespace map
 # ---------------------------------------------------------------------------
 NS = {
@@ -474,11 +593,11 @@ def write_compact_json(index: dict, output_path: Path):
     compact = {}
     for name, entry in index.items():
         if isinstance(entry, list):
-            sections = [e["section"] for e in entry]
             primary = entry[0]
+            sections = primary.get("sections_opm") or [e["section"] for e in entry]
         else:
-            sections = [entry["section"]]
             primary = entry
+            sections = entry.get("sections_opm") or [entry["section"]]
         examples = primary.get("examples", [])
         example_text = "\n".join(e for e in examples if isinstance(e, str))[:4000]
         summary = primary.get("summary", "")
@@ -545,6 +664,12 @@ def main():
         help="Output compact JSON for VS Code extension bundling (e.g. --compact keyword_index_compact.json)"
     )
     parser.add_argument(
+        "--opm-common-dir", default=None,
+        help="Path to opm-common keywords dir "
+             "(opm/input/eclipse/share/keywords). When given, sections and "
+             "per-parameter type/dimension are merged from opm-common."
+    )
+    parser.add_argument(
         "--keyword", default=None,
         help="Parse and print a single keyword for debugging (e.g. --keyword WELSPECS)"
     )
@@ -565,6 +690,12 @@ def main():
 
     print(f"Building index from: {manual_dir}")
     index = build_index(manual_dir)
+
+    if args.opm_common_dir:
+        opm_common_index = load_opm_common_index(
+            Path(args.opm_common_dir).expanduser().resolve()
+        )
+        merge_opm_common(index, opm_common_index)
 
     write_json(index, Path(args.output))
     if args.tsv:

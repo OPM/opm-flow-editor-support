@@ -8,6 +8,7 @@ Focus areas (per issue):
   - float/integer value formatting
 """
 
+import json
 import sys
 import os
 import textwrap
@@ -29,6 +30,9 @@ from build_keyword_index import (
     parse_keyword_file,
     params_to_markdown,
     iter_paragraphs,
+    load_opm_common_index,
+    merge_opm_common,
+    _opm_item_for_param,
     NS,
     SECTION_MAP,
 )
@@ -512,3 +516,143 @@ class TestParamsToMarkdown:
         assert "Laboratory" in md
         assert "STBD" in md
         assert "SM3/D" in md
+
+
+# ---------------------------------------------------------------------------
+# opm-common merge
+# ---------------------------------------------------------------------------
+
+
+class TestOpmCommonItemLookup:
+    def test_int_index_positional(self):
+        items = [{"name": "A"}, {"name": "B"}, {"name": "C"}]
+        assert _opm_item_for_param(items, 1)["name"] == "A"
+        assert _opm_item_for_param(items, 3)["name"] == "C"
+
+    def test_explicit_item_field_wins_over_position(self):
+        # WELSPECS-style: explicit "item" field
+        items = [{"item": 5, "name": "FIVE"}, {"item": 1, "name": "ONE"}]
+        assert _opm_item_for_param(items, 1)["name"] == "ONE"
+        assert _opm_item_for_param(items, 5)["name"] == "FIVE"
+
+    def test_range_index_uses_start(self):
+        items = [{"name": "A"}, {"name": "B"}]
+        assert _opm_item_for_param(items, "1-2")["name"] == "A"
+
+    def test_out_of_range_returns_none(self):
+        items = [{"name": "A"}]
+        assert _opm_item_for_param(items, 5) is None
+
+    def test_empty_items_returns_none(self):
+        assert _opm_item_for_param([], 1) is None
+
+    def test_unparseable_string_returns_none(self):
+        assert _opm_item_for_param([{"name": "A"}], "??") is None
+
+
+class TestLoadOpmCommonIndex:
+    @staticmethod
+    def _write_kw(base: Path, dialect: str, letter: str, name: str, payload: dict):
+        d = base / dialect / letter
+        d.mkdir(parents=True, exist_ok=True)
+        (d / name).write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_loads_keywords_across_dialects(self, tmp_path):
+        self._write_kw(tmp_path, "000_Eclipse100", "W", "WELSPECS", {
+            "name": "WELSPECS",
+            "sections": ["SCHEDULE"],
+            "items": [{"name": "WELL", "value_type": "STRING"}],
+        })
+        self._write_kw(tmp_path, "900_OPM", "M", "MULTREGT", {
+            "name": "MULTREGT", "sections": ["GRID"], "items": []
+        })
+
+        idx = load_opm_common_index(tmp_path)
+        assert "WELSPECS" in idx
+        assert idx["WELSPECS"]["sections"] == ["SCHEDULE"]
+        assert idx["WELSPECS"]["items"][0]["value_type"] == "STRING"
+        assert "MULTREGT" in idx
+
+    def test_first_dialect_wins_on_duplicate(self, tmp_path):
+        for dialect, value in [("000_Eclipse100", "E100"), ("900_OPM", "OPM")]:
+            self._write_kw(tmp_path, dialect, "X", "XYZ", {
+                "name": "XYZ", "sections": [value], "items": [],
+            })
+        idx = load_opm_common_index(tmp_path)
+        # E100 is iterated first, so it wins
+        assert idx["XYZ"]["sections"] == ["E100"]
+
+    def test_invalid_json_is_skipped(self, tmp_path):
+        d = tmp_path / "000_Eclipse100" / "B"
+        d.mkdir(parents=True)
+        (d / "BAD").write_text("{ not valid json", encoding="utf-8")
+        idx = load_opm_common_index(tmp_path)
+        assert idx == {}
+
+
+class TestMergeOpmCommon:
+    def _manual_entry(self, sections=("RUNSPEC",), params=None):
+        return {
+            "name": "ACTDIMS",
+            "section": sections[0],
+            "supported": True,
+            "summary": "Action dims",
+            "description": "",
+            "parameters": params or [],
+            "examples": [],
+            "full_text": "",
+            "source_file": "",
+        }
+
+    def test_sections_replaced_from_opm_common(self):
+        index = {"ACTDIMS": self._manual_entry(sections=("PROPS",))}
+        opm = {"ACTDIMS": {"sections": ["RUNSPEC"], "items": []}}
+        merge_opm_common(index, opm)
+        assert index["ACTDIMS"]["sections_opm"] == ["RUNSPEC"]
+        assert index["ACTDIMS"]["section"] == "RUNSPEC"
+
+    def test_empty_opm_sections_does_not_clobber(self):
+        # RUNSPEC keyword has sections: [] in opm-common — keep manual's
+        index = {"RUNSPEC": self._manual_entry(sections=("RUNSPEC",))}
+        opm = {"RUNSPEC": {"sections": [], "items": []}}
+        merge_opm_common(index, opm)
+        assert index["RUNSPEC"]["section"] == "RUNSPEC"
+        assert "sections_opm" not in index["RUNSPEC"]
+
+    def test_value_type_and_dimension_attached_to_params(self):
+        params = [
+            {"index": 1, "name": "MAX_ACTION", "description": "...", "units": {}, "default": "2"},
+            {"index": 2, "name": "MAX_LINES",  "description": "...", "units": {}, "default": "50"},
+        ]
+        index = {"ACTDIMS": self._manual_entry(params=params)}
+        opm = {"ACTDIMS": {
+            "sections": ["RUNSPEC"],
+            "items": [
+                {"name": "MAX_ACTION", "value_type": "INT"},
+                {"name": "MAX_LINES",  "value_type": "INT", "dimension": "Length"},
+            ],
+        }}
+        merge_opm_common(index, opm)
+        merged = index["ACTDIMS"]["parameters"]
+        assert merged[0]["value_type"] == "INT"
+        assert "dimension" not in merged[0]
+        assert merged[1]["value_type"] == "INT"
+        assert merged[1]["dimension"] == "Length"
+
+    def test_keywords_without_opm_match_are_unchanged(self):
+        params = [{"index": 1, "name": "X", "description": "", "units": {}, "default": ""}]
+        index = {"OBSCURE": self._manual_entry(params=params)}
+        merge_opm_common(index, {})  # no opm-common entry
+        assert "value_type" not in index["OBSCURE"]["parameters"][0]
+        assert "sections_opm" not in index["OBSCURE"]
+
+    def test_merge_handles_list_form_entries(self):
+        # Multi-section keywords are stored as a list of entries
+        e1 = self._manual_entry(sections=("RUNSPEC",))
+        e2 = self._manual_entry(sections=("GRID",))
+        e2["section"] = "GRID"
+        index = {"INCLUDE": [e1, e2]}
+        opm = {"INCLUDE": {"sections": ["RUNSPEC", "GRID", "PROPS"], "items": []}}
+        merge_opm_common(index, opm)
+        for e in index["INCLUDE"]:
+            assert e["sections_opm"] == ["RUNSPEC", "GRID", "PROPS"]

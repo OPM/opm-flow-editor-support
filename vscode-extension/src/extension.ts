@@ -23,6 +23,8 @@ interface Parameter {
   description: string;
   units: { field?: string; metric?: string; laboratory?: string };
   default: string;
+  value_type?: string;   // INT | DOUBLE | STRING | RAW_STRING | UDA
+  dimension?: string;    // Length | Pressure | Time | …
 }
 
 interface KeywordEntry {
@@ -81,6 +83,11 @@ function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function paramTypeLabel(p: Parameter): string {
+  if (p.value_type && p.dimension) return `${p.value_type} (${p.dimension})`;
+  return p.value_type || p.dimension || '';
+}
+
 function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | null): string {
   const css = `
     body {
@@ -131,17 +138,20 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
   let paramsHtml = '';
   if (entry.parameters && entry.parameters.length > 0) {
     const hasUnits = entry.parameters.some(p => p.units && Object.keys(p.units).length > 0);
+    const hasType  = entry.parameters.some(p => paramTypeLabel(p));
     const unitCols = hasUnits ? '<th>Field</th><th>Metric</th><th>Lab</th>' : '';
+    const typeCol  = hasType ? '<th>Type</th>' : '';
     const rows = entry.parameters.map(p => {
       const u = p.units ?? {};
       const unitCells = hasUnits
         ? `<td>${escHtml(u.field ?? '')}</td><td>${escHtml(u.metric ?? '')}</td><td>${escHtml(u.laboratory ?? '')}</td>`
         : '';
+      const typeCell  = hasType ? `<td>${escHtml(paramTypeLabel(p))}</td>` : '';
       const hl = highlightParam && highlightParam.index === p.index ? ' class="highlight"' : '';
-      return `<tr${hl}><td>${p.index}</td><td><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${unitCells}<td>${escHtml(p.default)}</td></tr>`;
+      return `<tr${hl}><td>${p.index}</td><td><code>${escHtml(p.name)}</code></td>${typeCell}<td>${escHtml(p.description)}</td>${unitCells}<td>${escHtml(p.default)}</td></tr>`;
     }).join('');
     paramsHtml = `<h2>Parameters</h2>
-      <table><thead><tr><th>No.</th><th>Name</th><th>Description</th>${unitCols}<th>Default</th></tr></thead>
+      <table><thead><tr><th>No.</th><th>Name</th>${typeCol}<th>Description</th>${unitCols}<th>Default</th></tr></thead>
       <tbody>${rows}</tbody></table>`;
   }
 
@@ -207,6 +217,8 @@ function buildParameterHover(entry: KeywordEntry, param: Parameter): vscode.Mark
   const md = new vscode.MarkdownString();
   md.isTrusted = true;
   md.appendMarkdown(`**\`${entry.name}\` — parameter ${param.index}: \`${param.name}\`**\n\n`);
+  const typeLabel = paramTypeLabel(param);
+  if (typeLabel) md.appendMarkdown(`*Type: ${typeLabel}*\n\n`);
   md.appendMarkdown(`${param.description}\n\n`);
   const u = param.units ?? {};
   if (u.field || u.metric || u.laboratory) {
@@ -220,16 +232,21 @@ function buildParameterHover(entry: KeywordEntry, param: Parameter): vscode.Mark
 function appendParameterTable(md: vscode.MarkdownString, parameters: Parameter[]): void {
   if (!parameters || parameters.length === 0) return;
   const hasUnits = parameters.some(p => p.units && Object.keys(p.units).length > 0);
+  const hasType  = parameters.some(p => paramTypeLabel(p));
+  const typeHead = hasType ? ' Type |' : '';
+  const typeSep  = hasType ? '------|' : '';
   if (hasUnits) {
-    md.appendMarkdown(`**Parameters**\n\n| No. | Name | Description | Field | Metric | Lab | Default |\n|-----|------|-------------|-------|--------|-----|---------|\n`);
+    md.appendMarkdown(`**Parameters**\n\n| No. | Name |${typeHead} Description | Field | Metric | Lab | Default |\n|-----|------|${typeSep}-------------|-------|--------|-----|---------|\n`);
     for (const p of parameters) {
       const u = p.units || {};
-      md.appendMarkdown(`| ${p.index} | \`${p.name}\` | ${p.description} | ${u.field ?? ''} | ${u.metric ?? ''} | ${u.laboratory ?? ''} | ${p.default} |\n`);
+      const typeCell = hasType ? ` ${paramTypeLabel(p)} |` : '';
+      md.appendMarkdown(`| ${p.index} | \`${p.name}\` |${typeCell} ${p.description} | ${u.field ?? ''} | ${u.metric ?? ''} | ${u.laboratory ?? ''} | ${p.default} |\n`);
     }
   } else {
-    md.appendMarkdown(`**Parameters**\n\n| No. | Name | Description | Default |\n|-----|------|-------------|----------|\n`);
+    md.appendMarkdown(`**Parameters**\n\n| No. | Name |${typeHead} Description | Default |\n|-----|------|${typeSep}-------------|----------|\n`);
     for (const p of parameters) {
-      md.appendMarkdown(`| ${p.index} | \`${p.name}\` | ${p.description} | ${p.default} |\n`);
+      const typeCell = hasType ? ` ${paramTypeLabel(p)} |` : '';
+      md.appendMarkdown(`| ${p.index} | \`${p.name}\` |${typeCell} ${p.description} | ${p.default} |\n`);
     }
   }
   md.appendMarkdown('\n');
