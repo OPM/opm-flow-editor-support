@@ -5,6 +5,7 @@ import {
   Token,
   tokenizeLine,
   columnAtCursor,
+  columnForCompletion,
   RecordLine,
   parseRecordLine,
   isCommentLine,
@@ -29,6 +30,7 @@ interface Parameter {
   default: string;
   value_type?: string;   // INT | DOUBLE | STRING | RAW_STRING | UDA
   dimension?: string;    // Length | Pressure | Time | …
+  options?: string[];    // valid string values (extracted from the manual)
 }
 
 interface KeywordEntry {
@@ -548,7 +550,7 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // --- Completion provider ---
+  // --- Completion provider: keyword names at the start of a line ---
   const completionProvider = vscode.languages.registerCompletionItemProvider(
     'opm-flow',
     {
@@ -563,6 +565,68 @@ export function activate(context: vscode.ExtensionContext): void {
           const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword);
           item.detail = `[${entry.sections.join(', ')}] OPM Flow`;
           if (entry.summary) item.documentation = new vscode.MarkdownString(entry.summary);
+          return item;
+        });
+      },
+    },
+    ...('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''))
+  );
+
+  // --- Completion provider: enum-style values inside record lines ---
+  const valueCompletionProvider = vscode.languages.registerCompletionItemProvider(
+    'opm-flow',
+    {
+      provideCompletionItems(
+        document: vscode.TextDocument,
+        position: vscode.Position
+      ): vscode.CompletionItem[] {
+        const line = document.lineAt(position).text;
+        const prefix = line.substring(0, position.character);
+        // Skip when the prefix still looks like a keyword declaration —
+        // the keyword completion provider handles that case.
+        if (/^\s*[A-Z][A-Z0-9_-]*$/.test(prefix)) return [];
+        // Skip inside line comments
+        if (/^\s*--/.test(prefix)) return [];
+
+        const kwName = findActiveKeyword(document, position);
+        if (!kwName) return [];
+        const entry = index[kwName];
+        if (!entry?.parameters?.length) return [];
+
+        const col = columnForCompletion(line, position.character);
+        const param = entry.parameters.find(p => {
+          if (p.index === col) return true;
+          if (typeof p.index === 'string') {
+            const start = Number(p.index.split('-')[0]);
+            const end   = Number(p.index.split('-')[1] || start);
+            return col >= start && col <= end;
+          }
+          return false;
+        });
+        if (!param?.options?.length) return [];
+
+        // If the cursor sits inside (or right after) a token that already
+        // starts with a single quote, the inserted `'VALUE'` should replace
+        // that whole token so we don't end up with `''VALUE'`.
+        const tokens = tokenizeLine(line);
+        const quotedTok = tokens.find(t =>
+          position.character >= t.start &&
+          position.character <= t.end &&
+          t.text.startsWith("'"),
+        );
+        const replaceRange = quotedTok
+          ? new vscode.Range(position.line, quotedTok.start, position.line, quotedTok.end)
+          : undefined;
+
+        return param.options.map(opt => {
+          const quoted = `'${opt}'`;
+          const item = new vscode.CompletionItem(quoted, vscode.CompletionItemKind.EnumMember);
+          item.insertText = quoted;
+          // Match against the bare option so typing `OP` still finds `'OPEN'`.
+          item.filterText = opt;
+          item.detail = `${kwName} parameter ${param.index}: ${param.name}`;
+          if (param.description) item.documentation = new vscode.MarkdownString(param.description);
+          if (replaceRange) item.range = replaceRange;
           return item;
         });
       },
@@ -735,7 +799,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidCloseTextDocument(doc => diagnostics.delete(doc.uri)),
   );
 
-  context.subscriptions.push(completionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, includeLinkProvider, foldingProvider);
+  context.subscriptions.push(completionProvider, valueCompletionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, includeLinkProvider, foldingProvider);
 }
 
 export function deactivate(): void {}

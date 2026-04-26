@@ -51,6 +51,30 @@ export function columnAtCursor(line: string, cursorChar: number): number {
   return -1;
 }
 
+/**
+ * Like columnAtCursor, but used at completion time: when the cursor sits
+ * past all completed tokens (e.g. at the end of `'W1' 'G1' `), this
+ * returns the column the next token would occupy. The end of the *last*
+ * token at end-of-buffer counts as "still in that token" so completions
+ * keep firing while the user types its value.
+ */
+export function columnForCompletion(line: string, cursorChar: number): number {
+  const tokens = tokenizeLine(line);
+  let col = 1;
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (cursorChar < tok.start) return col;
+    if (cursorChar >= tok.start && cursorChar < tok.end) return col;
+    const isPartialAtEnd =
+      cursorChar === tok.end &&
+      i === tokens.length - 1 &&
+      cursorChar === line.length;
+    if (isPartialAtEnd) return col;
+    col += tok.columnCount;
+  }
+  return col;
+}
+
 // ---------------------------------------------------------------------------
 // Record line parser
 // ---------------------------------------------------------------------------

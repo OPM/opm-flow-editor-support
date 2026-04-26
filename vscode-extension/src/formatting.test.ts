@@ -1,6 +1,7 @@
 import {
   tokenizeLine,
   columnAtCursor,
+  columnForCompletion,
   parseRecordLine,
   isCommentLine,
   formatRecordGroup,
@@ -626,5 +627,43 @@ describe('buildHeadingAndAlignedRecords', () => {
     // Sw appears after the '--' prefix (minimum position 3)
     const swPos = heading.indexOf('Sw');
     expect(swPos).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// columnForCompletion
+// ---------------------------------------------------------------------------
+
+describe('columnForCompletion', () => {
+  test('inside the first token returns 1', () => {
+    const line = `'W1' 'G1' 1`;
+    expect(columnForCompletion(line, 1)).toBe(1);
+  });
+
+  test('after the first token (between tokens) returns the next column', () => {
+    const line = `'W1' 'G1' 1`;
+    // Position right after 'W1' (index 4) should return column 2.
+    expect(columnForCompletion(line, 4)).toBe(2);
+  });
+
+  test('past all tokens returns the next column', () => {
+    const line = `'W1' 'G1' `;
+    expect(columnForCompletion(line, line.length)).toBe(3);
+  });
+
+  test('counts N* repeats correctly', () => {
+    const line = `1 3* `;
+    // After "3*" (which is columns 2-4), next column is 5.
+    expect(columnForCompletion(line, line.length)).toBe(5);
+  });
+
+  test('inside a partial token at the end returns its column', () => {
+    const line = `'W1' 'G1' OPE`;
+    // Cursor inside the OPE token (third token, column 3).
+    expect(columnForCompletion(line, line.length)).toBe(3);
+  });
+
+  test('empty line returns column 1', () => {
+    expect(columnForCompletion('', 0)).toBe(1);
   });
 });

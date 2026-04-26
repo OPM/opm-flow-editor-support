@@ -33,6 +33,8 @@ from build_keyword_index import (
     load_opm_common_index,
     merge_opm_common,
     synthesize_opm_only_entries,
+    extract_string_options,
+    attach_string_options,
     _opm_item_for_param,
     NS,
     SECTION_MAP,
@@ -711,3 +713,58 @@ class TestSynthesizeOpmOnly:
         synthesize_opm_only_entries(index, opm)
         assert index["BARE"]["parameters"] == []
         assert index["BARE"]["expected_columns"] is None
+
+
+class TestExtractStringOptions:
+    def test_typical_enum_description(self):
+        desc = (
+            "STATUS should be set to one of the following character strings: "
+            "OPEN: the well is open. SHUT: the well is shut. AUTO: auto mode."
+        )
+        assert extract_string_options(desc, "STATUS") == ["OPEN", "SHUT", "AUTO"]
+
+    def test_excludes_the_param_name_itself(self):
+        desc = "TYPE should be one of: GAS: a gas well. OIL: an oil well."
+        assert extract_string_options(desc, "TYPE") == ["GAS", "OIL"]
+
+    def test_deduplicates_repeated_tokens(self):
+        desc = "OPEN: open well. OPEN: same again. SHUT: closed."
+        assert extract_string_options(desc, "STATUS") == ["OPEN", "SHUT"]
+
+    def test_skips_uppercase_words_followed_by_uppercase(self):
+        # "VALID: NAMES are listed below" — VALID precedes uppercase, so the
+        # lookahead `(?=[a-z])` should reject it as an option.
+        desc = "VALID: NAMES are case-sensitive. ON: enabled. OFF: disabled."
+        opts = extract_string_options(desc, "X")
+        assert "VALID" not in opts
+        assert opts == ["ON", "OFF"]
+
+    def test_blocklists_prose_tokens(self):
+        desc = "NOTE: an explanatory note. NB: aside. RUN: execute."
+        assert extract_string_options(desc, "X") == ["RUN"]
+
+    def test_empty_description_returns_empty(self):
+        assert extract_string_options("", "TYPE") == []
+        assert extract_string_options(None, "TYPE") == []  # type: ignore
+
+
+class TestAttachStringOptions:
+    def _entry(self, params):
+        return {"name": "K", "section": "RUNSPEC", "parameters": params,
+                "supported": True, "summary": "", "description": "", "examples": []}
+
+    def test_attaches_only_when_two_or_more_options(self):
+        params = [
+            {"index": 1, "name": "P1", "value_type": "STRING",
+             "description": "P1 should be: GAS: a gas. OIL: oil. WAT: water."},
+            {"index": 2, "name": "P2", "value_type": "STRING",
+             "description": "P2 takes a free-form string of any length."},
+            {"index": 3, "name": "P3", "value_type": "INT",
+             "description": "P3: an integer count."},
+        ]
+        index = {"K": self._entry(params)}
+        attached = attach_string_options(index)
+        assert attached == 1
+        assert index["K"]["parameters"][0]["options"] == ["GAS", "OIL", "WAT"]
+        assert "options" not in index["K"]["parameters"][1]
+        assert "options" not in index["K"]["parameters"][2]  # not STRING

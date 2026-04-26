@@ -149,6 +149,54 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
     print(f"Merged opm-common: {merged_sections} keywords, {merged_params} parameters")
 
 
+# ---------------------------------------------------------------------------
+# Enum-option extraction from manual descriptions
+# ---------------------------------------------------------------------------
+# Many STRING parameters list their valid values inside the description text
+# in the form:  "FOO: explanation of FOO. BAR: explanation of BAR."
+# We capture those tokens so the extension can offer them as completions.
+
+_OPTION_RE = re.compile(r"\b([A-Z][A-Z0-9_]{1,9}):\s+(?=[a-z])")
+_OPTION_BLOCKLIST = {"NOTE", "NB"}
+_OPTION_MIN = 2  # only attach when at least this many distinct options found
+
+
+def extract_string_options(description: str, param_name: str) -> list[str]:
+    """
+    Pull `WORD:` enum tokens out of a parameter description.
+    Returns a deduplicated list in first-seen order, excluding the param's own
+    name and a small blocklist of prose tokens like NOTE.
+    """
+    if not description:
+        return []
+    seen: list[str] = []
+    for tok in _OPTION_RE.findall(description):
+        if tok == param_name or tok in _OPTION_BLOCKLIST or tok in seen:
+            continue
+        seen.append(tok)
+    return seen
+
+
+def attach_string_options(index: dict) -> int:
+    """
+    Walk the index; for every STRING parameter where the description yields
+    at least two enum-style options, attach them as `options`.
+    Returns the number of parameters with options attached.
+    """
+    attached = 0
+    for entry in index.values():
+        primary = entry[0] if isinstance(entry, list) else entry
+        for p in primary.get("parameters", []):
+            if p.get("value_type") != "STRING":
+                continue
+            opts = extract_string_options(p.get("description", ""), p.get("name", ""))
+            if len(opts) >= _OPTION_MIN:
+                p["options"] = opts
+                attached += 1
+    print(f"Attached options to {attached} STRING parameters")
+    return attached
+
+
 def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
     """
     Add manual-shape entries for keywords that exist in opm-common but not
@@ -753,6 +801,7 @@ def main():
         )
         merge_opm_common(index, opm_common_index)
         synthesize_opm_only_entries(index, opm_common_index)
+        attach_string_options(index)
 
     write_json(index, Path(args.output))
     if args.tsv:

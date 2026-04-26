@@ -53,6 +53,9 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
 - **Keyword autocompletion** for OPM Flow keywords (including OPM-specific
   extensions like `PYACTION`), with every valid section and a one-line
   summary shown inline.
+- **Value autocompletion** inside records: when the parameter at the
+  current column has known string options (e.g. `OPEN`/`SHUT`/`AUTO`
+  for `COMPDAT` STATUS), the suggestion list shows them.
 - **Hover tooltips** showing all valid sections for the keyword, a summary,
   parameter table (with parameter type and dimension where known), and
   example. Hovering over a value in a data record shows the matching
