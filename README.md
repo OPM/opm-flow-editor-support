@@ -57,8 +57,10 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
   parameter table (with parameter type and dimension where known), and
   example. Hovering over a value in a data record shows the matching
   parameter column.
-- **Arity diagnostics** — records with too many values (more than the
-  per-record item count from the OPM Flow parser) are flagged as warnings.
+- **Diagnostics** — records with too many values (more than the per-record
+  item count from the OPM Flow parser) and keywords placed in a section
+  where they are not valid (e.g. `WELSPECS` outside `SCHEDULE`) are flagged
+  as warnings.
 - **Docs sidebar panel** that follows the cursor — full documentation for the
   keyword under the cursor, with the active parameter row highlighted.
 - **Collapsible sections and keywords** — fold section blocks (from one

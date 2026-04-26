@@ -10,13 +10,16 @@ import {
   isCommentLine,
   NUMERIC_TOKEN_RE,
   KEYWORD_TOKEN_RE,
+  KEYWORD_LINE_RE,
+  SECTION_KEYWORDS,
+  SECTION_KEYWORD_SET,
   formatRecordGroup,
   parseHeadingPositions,
   formatRecordGroupWithHeading,
   buildHeadingAndAlignedRecords,
   tokenColumnCount,
 } from './formatting';
-import { computeArityDiagnostics } from './analysis';
+import { computeDiagnostics } from './analysis';
 
 interface Parameter {
   index: number | string;
@@ -60,8 +63,6 @@ function loadKeywordIndex(context: vscode.ExtensionContext): KeywordIndex {
 // Backward keyword scanner
 // ---------------------------------------------------------------------------
 
-const KEYWORD_LINE_RE = /^\s*([A-Z][A-Z0-9_+-]{1,})\s*(?:--|\/\s*(?:--|$)|$)/;
-
 function findActiveKeyword(document: vscode.TextDocument, position: vscode.Position): string | null {
   const scanLimit = Math.max(0, position.line - 200);
   for (let lineNum = position.line; lineNum >= scanLimit; lineNum--) {
@@ -69,6 +70,16 @@ function findActiveKeyword(document: vscode.TextDocument, position: vscode.Posit
     if (text.trim().startsWith('--')) continue;
     const m = text.match(KEYWORD_LINE_RE);
     if (m) return m[1];
+  }
+  return null;
+}
+
+function findCurrentSection(document: vscode.TextDocument, position: vscode.Position): string | null {
+  for (let lineNum = position.line; lineNum >= 0; lineNum--) {
+    const text = document.lineAt(lineNum).text;
+    if (text.trim().startsWith('--')) continue;
+    const m = text.match(KEYWORD_LINE_RE);
+    if (m && SECTION_KEYWORD_SET.has(m[1])) return m[1];
   }
   return null;
 }
@@ -205,9 +216,23 @@ class DocsViewProvider implements vscode.WebviewViewProvider {
 // Hover markdown builders (tooltip)
 // ---------------------------------------------------------------------------
 
-function buildKeywordHover(entry: KeywordEntry): vscode.MarkdownString {
+function buildKeywordHover(
+  entry: KeywordEntry,
+  currentSection?: string | null,
+): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
   md.isTrusted = true;
+  md.supportHtml = true;
+
+  if (
+    currentSection
+    && entry.sections.length > 0
+    && !entry.sections.includes(currentSection)
+  ) {
+    md.appendMarkdown(
+      `<span style="color:#cca700;">⚠ ${entry.name} is not valid in ${currentSection}; valid in: ${entry.sections.join(', ')}.</span>\n\n`,
+    );
+  }
 
   md.appendMarkdown(`## \`${entry.name}\` — ${entry.sections.join(', ')}\n\n`);
   if (entry.summary) md.appendMarkdown(`${entry.summary}\n\n`);
@@ -357,12 +382,6 @@ function computeAlignEdits(document: vscode.TextDocument, range?: vscode.Range):
 // Folding range provider
 // ---------------------------------------------------------------------------
 
-const SECTION_KEYWORDS = [
-  'RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS',
-  'SOLUTION', 'SUMMARY', 'SCHEDULE'
-] as const;
-const SECTION_KEYWORD_SET: ReadonlySet<string> = new Set(SECTION_KEYWORDS);
-
 class OpmFlowFoldingRangeProvider implements vscode.FoldingRangeProvider {
   provideFoldingRanges(document: vscode.TextDocument): vscode.FoldingRange[] {
     const ranges: vscode.FoldingRange[] = [];
@@ -456,10 +475,10 @@ class IncludeLinkProvider implements vscode.DocumentLinkProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Diagnostics — flag records with too many values
+// Diagnostics — over-arity records and wrong-section keywords
 // ---------------------------------------------------------------------------
 
-function refreshArityDiagnostics(
+function refreshDiagnostics(
   document: vscode.TextDocument,
   index: KeywordIndex,
   collection: vscode.DiagnosticCollection,
@@ -467,7 +486,7 @@ function refreshArityDiagnostics(
   if (document.languageId !== 'opm-flow') return;
   const lines: string[] = [];
   for (let i = 0; i < document.lineCount; i++) lines.push(document.lineAt(i).text);
-  const diags = computeArityDiagnostics(lines, index).map(d => {
+  const diags = computeDiagnostics(lines, index).map(d => {
     const range = new vscode.Range(d.line, d.startChar, d.line, d.endChar);
     const out = new vscode.Diagnostic(range, d.message, vscode.DiagnosticSeverity.Warning);
     out.source = 'OPM Flow';
@@ -557,7 +576,10 @@ export function activate(context: vscode.ExtensionContext): void {
       const line = document.lineAt(position).text;
 
       const word = wordAtPosition(document, position);
-      if (word && index[word]) return new vscode.Hover(buildKeywordHover(index[word]));
+      if (word && index[word]) {
+        const currentSection = findCurrentSection(document, position);
+        return new vscode.Hover(buildKeywordHover(index[word], currentSection));
+      }
 
       const col = columnAtCursor(line, position.character);
       if (col < 1) return undefined;
@@ -698,17 +720,17 @@ export function activate(context: vscode.ExtensionContext): void {
     new OpmFlowFoldingRangeProvider()
   );
 
-  // --- Diagnostics: flag records with too many values ---
+  // --- Diagnostics: over-arity records and wrong-section keywords ---
   const diagnostics = vscode.languages.createDiagnosticCollection('opm-flow');
   const refreshDiags = debounce((doc: vscode.TextDocument) => {
-    refreshArityDiagnostics(doc, index, diagnostics);
+    refreshDiagnostics(doc, index, diagnostics);
   }, 250);
   for (const editor of vscode.window.visibleTextEditors) {
-    refreshArityDiagnostics(editor.document, index, diagnostics);
+    refreshDiagnostics(editor.document, index, diagnostics);
   }
   context.subscriptions.push(
     diagnostics,
-    vscode.workspace.onDidOpenTextDocument(doc => refreshArityDiagnostics(doc, index, diagnostics)),
+    vscode.workspace.onDidOpenTextDocument(doc => refreshDiagnostics(doc, index, diagnostics)),
     vscode.workspace.onDidChangeTextDocument(e => refreshDiags(e.document)),
     vscode.workspace.onDidCloseTextDocument(doc => diagnostics.delete(doc.uri)),
   );

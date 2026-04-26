@@ -7,21 +7,23 @@ import {
   tokenColumnCount,
   parseRecordLine,
   isCommentLine,
+  KEYWORD_LINE_RE,
+  SECTION_KEYWORD_SET,
 } from './formatting';
 
 export interface AnalysisEntry {
   name: string;
   expected_columns?: number;
+  /** Authoritative section list (from opm-common when available). */
+  sections?: string[];
 }
 
 export type AnalysisIndex = Record<string, AnalysisEntry>;
 
-const KEYWORD_LINE_RE = /^\s*([A-Z][A-Z0-9_+-]{1,})\s*(?:--|\/\s*(?:--|$)|$)/;
-
-export interface ArityDiagnostic {
+export interface LineDiagnostic {
   /** Zero-based document line. */
   line: number;
-  /** Zero-based char range covering the whole record line. */
+  /** Zero-based char range to underline. */
   startChar: number;
   endChar: number;
   /** Human-readable message ready for VS Code. */
@@ -29,16 +31,21 @@ export interface ArityDiagnostic {
 }
 
 /**
- * Walk a document line-by-line and flag record lines with more values than
- * the keyword's per-record arity (from opm-common). Too-few values are NOT
- * an error — OPM Flow auto-defaults trailing positions before the `/`.
+ * Walk a document and emit line-level diagnostics:
+ *
+ * - **Arity**: a record with more values than the keyword's per-record
+ *   item count (from opm-common). Too-few values are not flagged because
+ *   OPM Flow auto-defaults trailing positions before the `/`.
+ * - **Section validity**: a keyword whose authoritative `sections` list
+ *   does not include the section currently in scope.
  */
-export function computeArityDiagnostics(
+export function computeDiagnostics(
   lines: string[],
   index: AnalysisIndex,
-): ArityDiagnostic[] {
-  const out: ArityDiagnostic[] = [];
+): LineDiagnostic[] {
+  const out: LineDiagnostic[] = [];
   let activeKw: AnalysisEntry | null = null;
+  let currentSection: string | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const text = lines[i];
@@ -47,12 +54,36 @@ export function computeArityDiagnostics(
 
     const m = text.match(KEYWORD_LINE_RE);
     if (m) {
-      activeKw = index[m[1]] ?? null;
+      const kw = m[1];
+
+      if (SECTION_KEYWORD_SET.has(kw)) {
+        currentSection = kw;
+        activeKw = index[kw] ?? null;
+        continue;
+      }
+
+      activeKw = index[kw] ?? null;
+
+      // Section-validity check
+      if (
+        activeKw?.sections?.length &&
+        currentSection &&
+        !activeKw.sections.includes(currentSection)
+      ) {
+        const indent = text.length - text.trimStart().length;
+        out.push({
+          line: i,
+          startChar: indent,
+          endChar: indent + kw.length,
+          message:
+            `${kw} is not valid in ${currentSection}; valid in: ${activeKw.sections.join(', ')}.`,
+        });
+      }
       continue;
     }
 
+    // Arity check on record lines
     if (!activeKw || !activeKw.expected_columns) continue;
-
     const rec = parseRecordLine(text);
     if (!rec) continue;
 

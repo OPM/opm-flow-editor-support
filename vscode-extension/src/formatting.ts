@@ -59,6 +59,18 @@ export const NUMERIC_TOKEN_RE = /^(\*|\d+\*|[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)
 
 export const KEYWORD_TOKEN_RE = /^[A-Z][A-Z0-9_+-]*$/;
 
+/** Matches a line that is just a keyword declaration (with optional trailing
+ *  comment or `/`), as opposed to a record line. */
+export const KEYWORD_LINE_RE = /^\s*([A-Z][A-Z0-9_+-]{1,})\s*(?:--|\/\s*(?:--|$)|$)/;
+
+/** The eight section-marker keywords, in canonical OPM Flow order. */
+export const SECTION_KEYWORDS = [
+  'RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS',
+  'SOLUTION', 'SUMMARY', 'SCHEDULE',
+] as const;
+
+export const SECTION_KEYWORD_SET: ReadonlySet<string> = new Set(SECTION_KEYWORDS);
+
 /** Number of parameter columns a record token represents (N for "N*", 1 otherwise). */
 export function tokenColumnCount(token: string): number {
   const m = token.match(/^(\d+)\*$/);
