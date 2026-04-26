@@ -1,6 +1,7 @@
 import {
   tokenizeLine,
   columnAtCursor,
+  columnForCompletion,
   parseRecordLine,
   isCommentLine,
   formatRecordGroup,
@@ -40,6 +41,14 @@ describe('tokenizeLine', () => {
     expect(tokens).toHaveLength(1);
     expect(tokens[0].text).toBe('1*');
     expect(tokens[0].columnCount).toBe(1);
+  });
+
+  test('N*VALUE (repeated value, no space) spans N columns', () => {
+    // 3*1.5 means three columns each set to 1.5; it is a single token but
+    // covers three record positions toward arity counting.
+    const tokens = tokenizeLine('1 3*1.5 9');
+    expect(tokens.map(t => t.text)).toEqual(['1', '3*1.5', '9']);
+    expect(tokens[1].columnCount).toBe(3);
   });
 
   test('mixed explicit values and defaults', () => {
@@ -113,6 +122,12 @@ describe('tokenColumnCount', () => {
 
   test('1* spans 1 column', () => {
     expect(tokenColumnCount('1*')).toBe(1);
+  });
+
+  test('N*VALUE form spans N columns', () => {
+    expect(tokenColumnCount('3*1.5')).toBe(3);
+    expect(tokenColumnCount('2*0')).toBe(2);
+    expect(tokenColumnCount('10*-1.0')).toBe(10);
   });
 });
 
@@ -626,5 +641,43 @@ describe('buildHeadingAndAlignedRecords', () => {
     // Sw appears after the '--' prefix (minimum position 3)
     const swPos = heading.indexOf('Sw');
     expect(swPos).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// columnForCompletion
+// ---------------------------------------------------------------------------
+
+describe('columnForCompletion', () => {
+  test('inside the first token returns 1', () => {
+    const line = `'W1' 'G1' 1`;
+    expect(columnForCompletion(line, 1)).toBe(1);
+  });
+
+  test('after the first token (between tokens) returns the next column', () => {
+    const line = `'W1' 'G1' 1`;
+    // Position right after 'W1' (index 4) should return column 2.
+    expect(columnForCompletion(line, 4)).toBe(2);
+  });
+
+  test('past all tokens returns the next column', () => {
+    const line = `'W1' 'G1' `;
+    expect(columnForCompletion(line, line.length)).toBe(3);
+  });
+
+  test('counts N* repeats correctly', () => {
+    const line = `1 3* `;
+    // After "3*" (which is columns 2-4), next column is 5.
+    expect(columnForCompletion(line, line.length)).toBe(5);
+  });
+
+  test('inside a partial token at the end returns its column', () => {
+    const line = `'W1' 'G1' OPE`;
+    // Cursor inside the OPE token (third token, column 3).
+    expect(columnForCompletion(line, line.length)).toBe(3);
+  });
+
+  test('empty line returns column 1', () => {
+    expect(columnForCompletion('', 0)).toBe(1);
   });
 });

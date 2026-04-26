@@ -2,3 +2,6 @@
 	path = opm-reference-manual
 	url = https://github.com/OPM/opm-reference-manual.git
 	branch = main
+[submodule "opm-common"]
+	path = opm-common
+	url = https://github.com/OPM/opm-common.git

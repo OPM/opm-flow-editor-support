@@ -4,7 +4,9 @@
 
 ```
 opm-flow-editor-support/
-├── opm-reference-manual/    # git submodule — source of truth for keywords (.fodt)
+├── opm-reference-manual/    # git submodule — keyword docs (.fodt)
+├── opm-common/              # git submodule — parser truth (sparse: only
+│                            #   opm/input/eclipse/share/keywords)
 ├── scripts/                 # keyword-index builder (Python)
 │   ├── build_keyword_index.py
 │   └── requirements.txt
@@ -15,6 +17,11 @@ opm-flow-editor-support/
     ├── data/keyword_index_compact.json
     └── package.json
 ```
+
+The two upstream sources are merged into a single index: `opm-reference-manual`
+provides descriptions, units, and examples; `opm-common` provides authoritative
+section validity and per-parameter `value_type` (INT/DOUBLE/STRING/…) and
+`dimension` (Length/Pressure/…) — both surfaced in hover and the docs sidebar.
 
 ## Clone
 
@@ -55,7 +62,9 @@ cd scripts
 pip install -r requirements.txt
 python build_keyword_index.py \
     --manual-dir ../opm-reference-manual \
-    --output ../vscode-extension/data/keyword_index_compact.json
+    --opm-common-dir ../opm-common/opm/input/eclipse/share/keywords \
+    --output ../keyword_index.json \
+    --compact ../vscode-extension/data/keyword_index_compact.json
 ```
 
 ## Release

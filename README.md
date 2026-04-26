@@ -50,11 +50,20 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
 
 - **Syntax highlighting** for section headers, keywords, comments, record
   terminators, numbers, repeat markers, and template variables.
-- **Keyword autocompletion** for OPM Flow keywords, with every valid section
-  and a one-line summary shown inline.
+- **Keyword autocompletion** for OPM Flow keywords (including OPM-specific
+  extensions like `PYACTION`), with every valid section and a one-line
+  summary shown inline.
+- **Value autocompletion** inside records: when the parameter at the
+  current column has known string options (e.g. `OPEN`/`SHUT`/`AUTO`
+  for `COMPDAT` STATUS), the suggestion list shows them.
 - **Hover tooltips** showing all valid sections for the keyword, a summary,
-  parameter table, and example. Hovering over a value in a data record shows
-  the matching parameter column.
+  parameter table (with parameter type and dimension where known), and
+  example. Hovering over a value in a data record shows the matching
+  parameter column.
+- **Diagnostics** — records with too many values (more than the per-record
+  item count from the OPM Flow parser) and keywords placed in a section
+  where they are not valid (e.g. `WELSPECS` outside `SCHEDULE`) are flagged
+  as warnings.
 - **Docs sidebar panel** that follows the cursor — full documentation for the
   keyword under the cursor, with the active parameter row highlighted.
 - **Collapsible sections and keywords** — fold section blocks (from one

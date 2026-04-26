@@ -8,6 +8,7 @@ Focus areas (per issue):
   - float/integer value formatting
 """
 
+import json
 import sys
 import os
 import textwrap
@@ -29,6 +30,12 @@ from build_keyword_index import (
     parse_keyword_file,
     params_to_markdown,
     iter_paragraphs,
+    load_opm_common_index,
+    merge_opm_common,
+    synthesize_opm_only_entries,
+    extract_string_options,
+    attach_string_options,
+    _opm_item_for_param,
     NS,
     SECTION_MAP,
 )
@@ -512,3 +519,308 @@ class TestParamsToMarkdown:
         assert "Laboratory" in md
         assert "STBD" in md
         assert "SM3/D" in md
+
+
+# ---------------------------------------------------------------------------
+# opm-common merge
+# ---------------------------------------------------------------------------
+
+
+class TestOpmCommonItemLookup:
+    def test_int_index_positional(self):
+        items = [{"name": "A"}, {"name": "B"}, {"name": "C"}]
+        assert _opm_item_for_param(items, 1)["name"] == "A"
+        assert _opm_item_for_param(items, 3)["name"] == "C"
+
+    def test_explicit_item_field_wins_over_position(self):
+        # WELSPECS-style: explicit "item" field
+        items = [{"item": 5, "name": "FIVE"}, {"item": 1, "name": "ONE"}]
+        assert _opm_item_for_param(items, 1)["name"] == "ONE"
+        assert _opm_item_for_param(items, 5)["name"] == "FIVE"
+
+    def test_range_index_uses_start(self):
+        items = [{"name": "A"}, {"name": "B"}]
+        assert _opm_item_for_param(items, "1-2")["name"] == "A"
+
+    def test_out_of_range_returns_none(self):
+        items = [{"name": "A"}]
+        assert _opm_item_for_param(items, 5) is None
+
+    def test_empty_items_returns_none(self):
+        assert _opm_item_for_param([], 1) is None
+
+    def test_unparseable_string_returns_none(self):
+        assert _opm_item_for_param([{"name": "A"}], "??") is None
+
+
+class TestLoadOpmCommonIndex:
+    @staticmethod
+    def _write_kw(base: Path, dialect: str, letter: str, name: str, payload: dict):
+        d = base / dialect / letter
+        d.mkdir(parents=True, exist_ok=True)
+        (d / name).write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_loads_keywords_across_dialects(self, tmp_path):
+        self._write_kw(tmp_path, "000_Eclipse100", "W", "WELSPECS", {
+            "name": "WELSPECS",
+            "sections": ["SCHEDULE"],
+            "items": [{"name": "WELL", "value_type": "STRING"}],
+        })
+        self._write_kw(tmp_path, "900_OPM", "M", "MULTREGT", {
+            "name": "MULTREGT", "sections": ["GRID"], "items": []
+        })
+
+        idx = load_opm_common_index(tmp_path)
+        assert "WELSPECS" in idx
+        assert idx["WELSPECS"]["sections"] == ["SCHEDULE"]
+        assert idx["WELSPECS"]["items"][0]["value_type"] == "STRING"
+        assert "MULTREGT" in idx
+
+    def test_first_dialect_wins_on_duplicate(self, tmp_path):
+        for dialect, value in [("000_Eclipse100", "E100"), ("900_OPM", "OPM")]:
+            self._write_kw(tmp_path, dialect, "X", "XYZ", {
+                "name": "XYZ", "sections": [value], "items": [],
+            })
+        idx = load_opm_common_index(tmp_path)
+        # E100 is iterated first, so it wins
+        assert idx["XYZ"]["sections"] == ["E100"]
+
+    def test_invalid_json_is_skipped(self, tmp_path):
+        d = tmp_path / "000_Eclipse100" / "B"
+        d.mkdir(parents=True)
+        (d / "BAD").write_text("{ not valid json", encoding="utf-8")
+        idx = load_opm_common_index(tmp_path)
+        assert idx == {}
+
+
+class TestMergeOpmCommon:
+    def _manual_entry(self, sections=("RUNSPEC",), params=None):
+        return {
+            "name": "ACTDIMS",
+            "section": sections[0],
+            "supported": True,
+            "summary": "Action dims",
+            "description": "",
+            "parameters": params or [],
+            "examples": [],
+            "full_text": "",
+            "source_file": "",
+        }
+
+    def test_sections_replaced_from_opm_common(self):
+        index = {"ACTDIMS": self._manual_entry(sections=("PROPS",))}
+        opm = {"ACTDIMS": {"sections": ["RUNSPEC"], "items": []}}
+        merge_opm_common(index, opm)
+        assert index["ACTDIMS"]["sections_opm"] == ["RUNSPEC"]
+        assert index["ACTDIMS"]["section"] == "RUNSPEC"
+
+    def test_empty_opm_sections_does_not_clobber(self):
+        # RUNSPEC keyword has sections: [] in opm-common — keep manual's
+        index = {"RUNSPEC": self._manual_entry(sections=("RUNSPEC",))}
+        opm = {"RUNSPEC": {"sections": [], "items": []}}
+        merge_opm_common(index, opm)
+        assert index["RUNSPEC"]["section"] == "RUNSPEC"
+        assert "sections_opm" not in index["RUNSPEC"]
+
+    def test_value_type_and_dimension_attached_to_params(self):
+        params = [
+            {"index": 1, "name": "MAX_ACTION", "description": "...", "units": {}, "default": "2"},
+            {"index": 2, "name": "MAX_LINES",  "description": "...", "units": {}, "default": "50"},
+        ]
+        index = {"ACTDIMS": self._manual_entry(params=params)}
+        opm = {"ACTDIMS": {
+            "sections": ["RUNSPEC"],
+            "items": [
+                {"name": "MAX_ACTION", "value_type": "INT"},
+                {"name": "MAX_LINES",  "value_type": "INT", "dimension": "Length"},
+            ],
+        }}
+        merge_opm_common(index, opm)
+        merged = index["ACTDIMS"]["parameters"]
+        assert merged[0]["value_type"] == "INT"
+        assert "dimension" not in merged[0]
+        assert merged[1]["value_type"] == "INT"
+        assert merged[1]["dimension"] == "Length"
+
+    def test_keywords_without_opm_match_are_unchanged(self):
+        params = [{"index": 1, "name": "X", "description": "", "units": {}, "default": ""}]
+        index = {"OBSCURE": self._manual_entry(params=params)}
+        merge_opm_common(index, {})  # no opm-common entry
+        assert "value_type" not in index["OBSCURE"]["parameters"][0]
+        assert "sections_opm" not in index["OBSCURE"]
+
+    def test_merge_handles_list_form_entries(self):
+        # Multi-section keywords are stored as a list of entries
+        e1 = self._manual_entry(sections=("RUNSPEC",))
+        e2 = self._manual_entry(sections=("GRID",))
+        e2["section"] = "GRID"
+        index = {"INCLUDE": [e1, e2]}
+        opm = {"INCLUDE": {"sections": ["RUNSPEC", "GRID", "PROPS"], "items": []}}
+        merge_opm_common(index, opm)
+        for e in index["INCLUDE"]:
+            assert e["sections_opm"] == ["RUNSPEC", "GRID", "PROPS"]
+
+    def test_expected_columns_set_from_items_count(self):
+        index = {"WELSPECS": self._manual_entry()}
+        opm = {"WELSPECS": {
+            "sections": ["SCHEDULE"],
+            "items": [{"name": f"i{i}"} for i in range(17)],
+        }}
+        merge_opm_common(index, opm)
+        assert index["WELSPECS"]["expected_columns"] == 17
+
+    def test_expected_columns_omitted_for_empty_items(self):
+        # Section-header keywords like RUNSPEC have no items
+        index = {"RUNSPEC": self._manual_entry()}
+        opm = {"RUNSPEC": {"sections": [], "items": []}}
+        merge_opm_common(index, opm)
+        assert "expected_columns" not in index["RUNSPEC"]
+
+    def test_missing_manual_items_are_backfilled_from_opm_common(self):
+        # COMPDAT-shaped: opm-common has 14 items but the manual only documents 13.
+        # The 14th must be appended so column-header generation and hovers
+        # have a name and type for that position.
+        params = [
+            {"index": i, "name": f"P{i}", "description": "", "units": {}, "default": ""}
+            for i in range(1, 14)
+        ]
+        index = {"COMPDAT": self._manual_entry(sections=("SCHEDULE",), params=params)}
+        opm = {"COMPDAT": {
+            "sections": ["SCHEDULE"],
+            "items": [{"name": f"I{i}"} for i in range(1, 14)] + [
+                {"name": "PR", "value_type": "DOUBLE", "comment": "Pressure radius"}
+            ],
+        }}
+        merge_opm_common(index, opm)
+        merged = index["COMPDAT"]["parameters"]
+        assert len(merged) == 14
+        assert index["COMPDAT"]["expected_columns"] == 14
+        last = merged[-1]
+        assert last["index"] == 14
+        assert last["name"] == "PR"
+        assert last["value_type"] == "DOUBLE"
+        assert last["description"] == "Pressure radius"
+
+    def test_grouped_index_blocks_backfill_of_covered_positions(self):
+        # A manual param indexed "1-2" covers positions 1 and 2; opm-common
+        # items at 1 and 2 must NOT be appended as duplicates.
+        params = [
+            {"index": "1-2", "name": "GROUPED", "description": "", "units": {}, "default": ""},
+            {"index": 3, "name": "P3", "description": "", "units": {}, "default": ""},
+        ]
+        index = {"VFPPROD": self._manual_entry(sections=("SCHEDULE",), params=params)}
+        opm = {"VFPPROD": {
+            "sections": ["SCHEDULE"],
+            "items": [{"name": "A"}, {"name": "B"}, {"name": "C"}, {"name": "D"}],
+        }}
+        merge_opm_common(index, opm)
+        merged = index["VFPPROD"]["parameters"]
+        # 2 manual + 1 backfilled (item 4); items 1, 2, 3 are already covered.
+        assert len(merged) == 3
+        indices = [p["index"] for p in merged]
+        assert "1-2" in indices
+        assert 3 in indices
+        assert 4 in indices
+
+
+class TestSynthesizeOpmOnly:
+    def test_keywords_only_in_opm_common_get_synthesized(self):
+        index: dict = {}
+        opm = {
+            "PYACTION": {
+                "sections": ["SCHEDULE"],
+                "items": [
+                    {"name": "FILE", "value_type": "STRING"},
+                    {"name": "RUN_COUNT", "value_type": "INT", "default": 1},
+                ],
+            }
+        }
+        added = synthesize_opm_only_entries(index, opm)
+        assert added == 1
+        e = index["PYACTION"]
+        assert e["name"] == "PYACTION"
+        assert e["section"] == "SCHEDULE"
+        assert e["expected_columns"] == 2
+        assert e["parameters"][0]["name"] == "FILE"
+        assert e["parameters"][0]["value_type"] == "STRING"
+        assert e["parameters"][1]["default"] == "1"
+        assert "OPM Flow keyword" in e["summary"]
+
+    def test_already_present_keywords_are_left_alone(self):
+        index = {"EXISTING": {"name": "EXISTING", "summary": "kept"}}
+        opm = {"EXISTING": {"sections": ["RUNSPEC"], "items": []}}
+        added = synthesize_opm_only_entries(index, opm)
+        assert added == 0
+        assert index["EXISTING"]["summary"] == "kept"
+
+    def test_synthesized_entry_with_no_items_has_empty_params(self):
+        index: dict = {}
+        opm = {"BARE": {"sections": ["RUNSPEC"], "items": []}}
+        synthesize_opm_only_entries(index, opm)
+        assert index["BARE"]["parameters"] == []
+        # No items → expected_columns omitted (rather than stored as None)
+        assert "expected_columns" not in index["BARE"]
+
+    def test_synthesized_entry_with_no_sections_keeps_empty_list(self):
+        # An opm-common entry with no sections (e.g. section-header keywords)
+        # should not be silently relabelled to RUNSPEC.
+        index: dict = {}
+        opm = {"MYSTERY": {"sections": [], "items": [{"name": "X"}]}}
+        synthesize_opm_only_entries(index, opm)
+        assert index["MYSTERY"]["sections_opm"] == []
+        assert index["MYSTERY"]["section"] == ""
+
+
+class TestExtractStringOptions:
+    def test_typical_enum_description(self):
+        desc = (
+            "STATUS should be set to one of the following character strings: "
+            "OPEN: the well is open. SHUT: the well is shut. AUTO: auto mode."
+        )
+        assert extract_string_options(desc, "STATUS") == ["OPEN", "SHUT", "AUTO"]
+
+    def test_excludes_the_param_name_itself(self):
+        desc = "TYPE should be one of: GAS: a gas well. OIL: an oil well."
+        assert extract_string_options(desc, "TYPE") == ["GAS", "OIL"]
+
+    def test_deduplicates_repeated_tokens(self):
+        desc = "OPEN: open well. OPEN: same again. SHUT: closed."
+        assert extract_string_options(desc, "STATUS") == ["OPEN", "SHUT"]
+
+    def test_skips_uppercase_words_followed_by_uppercase(self):
+        # "VALID: NAMES are listed below" — VALID precedes uppercase, so the
+        # lookahead `(?=[a-z])` should reject it as an option.
+        desc = "VALID: NAMES are case-sensitive. ON: enabled. OFF: disabled."
+        opts = extract_string_options(desc, "X")
+        assert "VALID" not in opts
+        assert opts == ["ON", "OFF"]
+
+    def test_blocklists_prose_tokens(self):
+        desc = "NOTE: an explanatory note. NB: aside. RUN: execute."
+        assert extract_string_options(desc, "X") == ["RUN"]
+
+    def test_empty_description_returns_empty(self):
+        assert extract_string_options("", "TYPE") == []
+        assert extract_string_options(None, "TYPE") == []  # type: ignore
+
+
+class TestAttachStringOptions:
+    def _entry(self, params):
+        return {"name": "K", "section": "RUNSPEC", "parameters": params,
+                "supported": True, "summary": "", "description": "", "examples": []}
+
+    def test_attaches_only_when_two_or_more_options(self):
+        params = [
+            {"index": 1, "name": "P1", "value_type": "STRING",
+             "description": "P1 should be: GAS: a gas. OIL: oil. WAT: water."},
+            {"index": 2, "name": "P2", "value_type": "STRING",
+             "description": "P2 takes a free-form string of any length."},
+            {"index": 3, "name": "P3", "value_type": "INT",
+             "description": "P3: an integer count."},
+        ]
+        index = {"K": self._entry(params)}
+        attached = attach_string_options(index)
+        assert attached == 1
+        assert index["K"]["parameters"][0]["options"] == ["GAS", "OIL", "WAT"]
+        assert "options" not in index["K"]["parameters"][1]
+        assert "options" not in index["K"]["parameters"][2]  # not STRING

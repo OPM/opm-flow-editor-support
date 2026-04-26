@@ -34,6 +34,7 @@ jobs:
         run: |
           python scripts/build_keyword_index.py \
             --manual-dir opm-reference-manual \
+            --opm-common-dir opm-common/opm/input/eclipse/share/keywords \
             --output keyword_index.json \
             --compact vscode-extension/data/keyword_index_compact.json
 

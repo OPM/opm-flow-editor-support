@@ -24,6 +24,281 @@ from lxml import etree
 
 
 # ---------------------------------------------------------------------------
+# opm-common keyword JSON loader and merge
+# ---------------------------------------------------------------------------
+# opm-common is the OPM Flow parser's source-of-truth for which keywords are
+# accepted, which sections they're valid in, and the type/dimension of each
+# parameter. Each keyword lives in:
+#     opm/input/eclipse/share/keywords/{dialect}/{LETTER}/{KEYWORD}
+# where dialect is one of 000_Eclipse100, 001_Eclipse300, 002_Frontsim,
+# 900_OPM. The file is JSON with shape:
+#     { "name": ..., "sections": [...], "items": [{name, value_type,
+#       dimension?, default?, comment?, item?}, ...] }
+
+OPM_COMMON_DIALECTS = ("000_Eclipse100", "001_Eclipse300", "002_Frontsim", "900_OPM")
+
+
+def load_opm_common_index(keywords_dir: Path) -> dict:
+    """
+    Walk the opm-common keywords tree and return a dict keyed by keyword name.
+
+    Each value: {"sections": [...], "items": [...]}. If a keyword appears in
+    multiple dialect dirs (uncommon in practice), the first one wins.
+    """
+    if not keywords_dir.exists():
+        sys.exit(f"ERROR: opm-common keywords dir not found: {keywords_dir}")
+
+    out: dict[str, dict] = {}
+    total = 0
+    for dialect in OPM_COMMON_DIALECTS:
+        dialect_dir = keywords_dir / dialect
+        if not dialect_dir.exists():
+            continue
+        for letter_dir in sorted(p for p in dialect_dir.iterdir() if p.is_dir()):
+            for kw_file in sorted(letter_dir.iterdir()):
+                if not kw_file.is_file():
+                    continue
+                try:
+                    with open(kw_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except (OSError, json.JSONDecodeError) as e:
+                    print(f"  WARNING: failed to read {kw_file}: {e}", file=sys.stderr)
+                    continue
+                name = data.get("name") or kw_file.name
+                if name in out:
+                    continue
+                out[name] = {
+                    "sections": data.get("sections", []),
+                    "items":    data.get("items", []),
+                }
+                total += 1
+    print(f"Loaded {total} keywords from opm-common ({keywords_dir})")
+    return out
+
+
+def _opm_item_for_param(opm_items: list[dict], manual_index) -> Optional[dict]:
+    """
+    Return the opm-common item matching a manual parameter index.
+
+    manual_index is a 1-based int or a string like "1-2" (grouped record).
+    Match by explicit "item" field first, then by 1-based position.
+    """
+    if not opm_items:
+        return None
+    if isinstance(manual_index, int):
+        pos = manual_index
+    elif isinstance(manual_index, str):
+        try:
+            pos = int(manual_index.split("-")[0])
+        except ValueError:
+            return None
+    else:
+        return None
+
+    for it in opm_items:
+        if it.get("item") == pos:
+            return it
+    if 1 <= pos <= len(opm_items):
+        return opm_items[pos - 1]
+    return None
+
+
+def _covered_indices(parameters: list[dict]) -> set[int]:
+    """Return the set of 1-based record positions already covered by manual params.
+
+    A grouped index like "1-2" covers both 1 and 2; bare ints cover themselves.
+    """
+    covered: set[int] = set()
+    for p in parameters:
+        idx = p.get("index")
+        if isinstance(idx, int):
+            covered.add(idx)
+        elif isinstance(idx, str):
+            try:
+                lo, hi = (idx.split("-") + [None])[:2]
+                lo_i = int(lo)
+                hi_i = int(hi) if hi else lo_i
+                covered.update(range(lo_i, hi_i + 1))
+            except ValueError:
+                pass
+    return covered
+
+
+def _synthesize_param_from_opm_item(item: dict, position: int) -> dict:
+    """Build a manual-shape parameter dict from an opm-common item."""
+    p = {
+        "index":       item.get("item", position),
+        "name":        item.get("name", f"item{position}"),
+        "description": item.get("comment", ""),
+        "units":       {},
+        "default":     "" if "default" not in item else str(item["default"]),
+    }
+    if "value_type" in item:
+        p["value_type"] = item["value_type"]
+    if "dimension" in item:
+        p["dimension"] = item["dimension"]
+    return p
+
+
+def merge_opm_common(index: dict, opm_common_index: dict) -> None:
+    """
+    Mutate *index* in place, attaching opm-common authoritative data:
+
+    - sections: replaced with opm-common's list when non-empty
+    - expected_columns: count of opm-common items (per record), used by
+      the extension to flag records with too many values
+    - parameters: each gets optional value_type and dimension copied from
+      the matching opm-common item, and any opm-common items not represented
+      in the manual are appended (so the per-record param list is complete
+      even when the reference manual is missing entries).
+
+    Manual entries that have no opm-common counterpart are left unchanged.
+    """
+    merged_sections = 0
+    merged_params = 0
+    appended_params = 0
+    for name, entry in index.items():
+        opm = opm_common_index.get(name)
+        if not opm:
+            continue
+        entries = entry if isinstance(entry, list) else [entry]
+        # Authoritative section list (skip when opm-common has none, e.g.
+        # section-header keywords like RUNSPEC).
+        if opm["sections"]:
+            for e in entries:
+                e["section"] = opm["sections"][0]
+                e["sections_opm"] = list(opm["sections"])
+            merged_sections += 1
+
+        # Per-record expected column count (parser-truth)
+        if opm["items"]:
+            for e in entries:
+                e["expected_columns"] = len(opm["items"])
+
+        # Per-parameter type/dimension
+        primary = entries[0]
+        manual_params = primary.get("parameters", [])
+        for p in manual_params:
+            it = _opm_item_for_param(opm["items"], p.get("index"))
+            if not it:
+                continue
+            if "value_type" in it:
+                p["value_type"] = it["value_type"]
+            if "dimension" in it:
+                p["dimension"] = it["dimension"]
+            merged_params += 1
+
+        # Backfill items the manual is missing (e.g. COMPDAT item 14 / PR).
+        # Without this, the column-header generator falls back to "COL14"
+        # and hovers can't describe the position even though opm-common
+        # knows its name and type.
+        if opm["items"]:
+            covered = _covered_indices(manual_params)
+            for pos, it in enumerate(opm["items"], 1):
+                item_pos = it.get("item", pos)
+                if item_pos in covered:
+                    continue
+                manual_params.append(_synthesize_param_from_opm_item(it, item_pos))
+                covered.add(item_pos)
+                appended_params += 1
+            manual_params.sort(key=lambda p: (
+                p["index"] if isinstance(p["index"], int)
+                else int(str(p["index"]).split("-")[0])
+            ))
+            primary["parameters"] = manual_params
+    print(
+        f"Merged opm-common: {merged_sections} keywords, "
+        f"{merged_params} parameters, {appended_params} backfilled"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Enum-option extraction from manual descriptions
+# ---------------------------------------------------------------------------
+# Many STRING parameters list their valid values inside the description text
+# in the form:  "FOO: explanation of FOO. BAR: explanation of BAR."
+# We capture those tokens so the extension can offer them as completions.
+
+_OPTION_RE = re.compile(r"\b([A-Z][A-Z0-9_]{1,9}):\s+(?=[a-z])")
+_OPTION_BLOCKLIST = {"NOTE", "NB"}
+_OPTION_MIN = 2  # only attach when at least this many distinct options found
+
+
+def extract_string_options(description: str, param_name: str) -> list[str]:
+    """
+    Pull `WORD:` enum tokens out of a parameter description.
+    Returns a deduplicated list in first-seen order, excluding the param's own
+    name and a small blocklist of prose tokens like NOTE.
+    """
+    if not description:
+        return []
+    seen: list[str] = []
+    for tok in _OPTION_RE.findall(description):
+        if tok == param_name or tok in _OPTION_BLOCKLIST or tok in seen:
+            continue
+        seen.append(tok)
+    return seen
+
+
+def attach_string_options(index: dict) -> int:
+    """
+    Walk the index; for every STRING parameter where the description yields
+    at least two enum-style options, attach them as `options`.
+    Returns the number of parameters with options attached.
+    """
+    attached = 0
+    for entry in index.values():
+        primary = entry[0] if isinstance(entry, list) else entry
+        for p in primary.get("parameters", []):
+            if p.get("value_type") != "STRING":
+                continue
+            opts = extract_string_options(p.get("description", ""), p.get("name", ""))
+            if len(opts) >= _OPTION_MIN:
+                p["options"] = opts
+                attached += 1
+    print(f"Attached options to {attached} STRING parameters")
+    return attached
+
+
+def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
+    """
+    Add manual-shape entries for keywords that exist in opm-common but not
+    in the reference manual (e.g. OPM-specific keywords under 900_OPM/).
+    Returns the number of entries added.
+    """
+    added = 0
+    for name, opm in opm_common_index.items():
+        if name in index:
+            continue
+        sections = list(opm["sections"])
+        items = opm["items"]
+        params = [
+            _synthesize_param_from_opm_item(it, i + 1)
+            for i, it in enumerate(items)
+        ]
+
+        entry = {
+            "name":        name,
+            # Empty list means "section unknown" — no validity check fires.
+            "section":     sections[0] if sections else "",
+            "sections_opm": sections,
+            "supported":   True,
+            "summary":     "(OPM Flow keyword — no reference-manual entry)",
+            "description": "",
+            "parameters":  params,
+            "examples":    [],
+            "full_text":   "",
+            "source_file": "",
+        }
+        if items:
+            entry["expected_columns"] = len(items)
+        index[name] = entry
+        added += 1
+    print(f"Synthesized {added} OPM-only entries")
+    return added
+
+
+# ---------------------------------------------------------------------------
 # ODF XML namespace map
 # ---------------------------------------------------------------------------
 NS = {
@@ -474,18 +749,29 @@ def write_compact_json(index: dict, output_path: Path):
     compact = {}
     for name, entry in index.items():
         if isinstance(entry, list):
-            sections = [e["section"] for e in entry]
             primary = entry[0]
+            # When opm-common merge ran, sections_opm is the authoritative list
+            # (and may legitimately be empty for synthesized OPM-only keywords
+            # whose section is unknown). Otherwise fall back to per-entry
+            # manual sections.
+            if "sections_opm" in primary:
+                sections = list(primary["sections_opm"])
+            else:
+                sections = [e["section"] for e in entry if e.get("section")]
         else:
-            sections = [entry["section"]]
             primary = entry
+            if "sections_opm" in primary:
+                sections = list(primary["sections_opm"])
+            else:
+                sec = primary.get("section", "")
+                sections = [sec] if sec else []
         examples = primary.get("examples", [])
         example_text = "\n".join(e for e in examples if isinstance(e, str))[:4000]
         summary = primary.get("summary", "")
         SUMMARY_LIMIT = 1000
         if len(summary) > SUMMARY_LIMIT:
             summary = summary[:SUMMARY_LIMIT].rstrip() + "..."
-        compact[name] = {
+        out_entry = {
             "name":        primary["name"],
             "sections":    sections,
             "supported":   primary["supported"],
@@ -493,6 +779,10 @@ def write_compact_json(index: dict, output_path: Path):
             "parameters":  primary.get("parameters", []),
             "example":     example_text,
         }
+        expected = primary.get("expected_columns")
+        if expected:
+            out_entry["expected_columns"] = expected
+        compact[name] = out_entry
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(compact, f, separators=(",", ":"), ensure_ascii=False)
     size_kb = output_path.stat().st_size // 1024
@@ -545,6 +835,12 @@ def main():
         help="Output compact JSON for VS Code extension bundling (e.g. --compact keyword_index_compact.json)"
     )
     parser.add_argument(
+        "--opm-common-dir", default=None,
+        help="Path to opm-common keywords dir "
+             "(opm/input/eclipse/share/keywords). When given, sections and "
+             "per-parameter type/dimension are merged from opm-common."
+    )
+    parser.add_argument(
         "--keyword", default=None,
         help="Parse and print a single keyword for debugging (e.g. --keyword WELSPECS)"
     )
@@ -565,6 +861,14 @@ def main():
 
     print(f"Building index from: {manual_dir}")
     index = build_index(manual_dir)
+
+    if args.opm_common_dir:
+        opm_common_index = load_opm_common_index(
+            Path(args.opm_common_dir).expanduser().resolve()
+        )
+        merge_opm_common(index, opm_common_index)
+        synthesize_opm_only_entries(index, opm_common_index)
+        attach_string_options(index)
 
     write_json(index, Path(args.output))
     if args.tsv:

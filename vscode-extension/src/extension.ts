@@ -1,21 +1,24 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import {
-  Token,
   tokenizeLine,
   columnAtCursor,
+  columnForCompletion,
   RecordLine,
   parseRecordLine,
   isCommentLine,
-  NUMERIC_TOKEN_RE,
-  KEYWORD_TOKEN_RE,
+  KEYWORD_LINE_RE,
+  SECTION_KEYWORDS,
+  SECTION_KEYWORD_SET,
   formatRecordGroup,
   parseHeadingPositions,
   formatRecordGroupWithHeading,
   buildHeadingAndAlignedRecords,
   tokenColumnCount,
 } from './formatting';
+import { computeDiagnostics } from './analysis';
 
 interface Parameter {
   index: number | string;
@@ -23,6 +26,9 @@ interface Parameter {
   description: string;
   units: { field?: string; metric?: string; laboratory?: string };
   default: string;
+  value_type?: string;        // INT | DOUBLE | STRING | RAW_STRING | UDA
+  dimension?: string | string[]; // Length | Pressure | Time | … (may be a list for multi-column items)
+  options?: string[];         // valid string values (extracted from the manual)
 }
 
 interface KeywordEntry {
@@ -32,6 +38,8 @@ interface KeywordEntry {
   summary: string;
   parameters: Parameter[];
   example: string;
+  /** Per-record arity from opm-common; absent for keywords lacking parser data. */
+  expected_columns?: number;
 }
 
 type KeywordIndex = Record<string, KeywordEntry>;
@@ -55,15 +63,22 @@ function loadKeywordIndex(context: vscode.ExtensionContext): KeywordIndex {
 // Backward keyword scanner
 // ---------------------------------------------------------------------------
 
-const KEYWORD_LINE_RE = /^\s*([A-Z][A-Z0-9_+-]{1,})\s*(?:--|\/\s*(?:--|$)|$)/;
-
 function findActiveKeyword(document: vscode.TextDocument, position: vscode.Position): string | null {
-  const scanLimit = Math.max(0, position.line - 200);
-  for (let lineNum = position.line; lineNum >= scanLimit; lineNum--) {
+  for (let lineNum = position.line; lineNum >= 0; lineNum--) {
     const text = document.lineAt(lineNum).text;
     if (text.trim().startsWith('--')) continue;
     const m = text.match(KEYWORD_LINE_RE);
     if (m) return m[1];
+  }
+  return null;
+}
+
+function findCurrentSection(document: vscode.TextDocument, position: vscode.Position): string | null {
+  for (let lineNum = position.line; lineNum >= 0; lineNum--) {
+    const text = document.lineAt(lineNum).text;
+    if (text.trim().startsWith('--')) continue;
+    const m = text.match(KEYWORD_LINE_RE);
+    if (m && SECTION_KEYWORD_SET.has(m[1])) return m[1];
   }
   return null;
 }
@@ -81,6 +96,23 @@ function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function paramTypeLabel(p: Parameter): string {
+  const dim = Array.isArray(p.dimension) ? p.dimension.join(', ') : (p.dimension || '');
+  if (p.value_type && dim) return `${p.value_type} (${dim})`;
+  return p.value_type || dim || '';
+}
+
+/** HTML-escape a string and insert <wbr> break opportunities after every
+ *  `/`, `*`, `_` so dense unit/dimension labels can wrap inside narrow
+ *  table cells without the browser breaking mid-word arbitrarily. */
+function escWithBreaks(s: string): string {
+  return escHtml(s).replace(/([\/_*])/g, '$1<wbr>');
+}
+
+function nonce(): string {
+  return crypto.randomBytes(8).toString('hex');
+}
+
 function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | null): string {
   const css = `
     body {
@@ -95,13 +127,16 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
     h1 { font-size: 1.15em; margin: 0 0 4px 0; }
     h2 { font-size: 1em; margin: 12px 0 4px 0; border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 2px; }
     p { margin: 4px 0 8px 0; }
-    table { border-collapse: collapse; width: 100%; font-size: 0.9em; margin-bottom: 8px; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9em; margin-bottom: 8px; table-layout: auto; }
     th {
       text-align: left; padding: 4px 6px;
       background: var(--vscode-editorGroupHeader-tabsBackground);
       border: 1px solid var(--vscode-panel-border);
     }
-    td { padding: 3px 6px; border: 1px solid var(--vscode-panel-border); vertical-align: top; }
+    td {
+      padding: 3px 6px; border: 1px solid var(--vscode-panel-border); vertical-align: top;
+      overflow-wrap: break-word;
+    }
     tr.highlight td { background: var(--vscode-editor-selectionBackground); }
     code {
       font-family: var(--vscode-editor-font-family);
@@ -128,20 +163,26 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
       <body><p class="placeholder">Move the cursor over a keyword or value to see documentation.</p></body></html>`;
   }
 
+  const n = nonce();
+  const paramTypes = (entry.parameters ?? []).map(paramTypeLabel);
+
   let paramsHtml = '';
   if (entry.parameters && entry.parameters.length > 0) {
     const hasUnits = entry.parameters.some(p => p.units && Object.keys(p.units).length > 0);
+    const hasType  = paramTypes.some(t => t.length > 0);
     const unitCols = hasUnits ? '<th>Field</th><th>Metric</th><th>Lab</th>' : '';
-    const rows = entry.parameters.map(p => {
+    const typeCol  = hasType ? '<th>Type</th>' : '';
+    const rows = entry.parameters.map((p, idx) => {
       const u = p.units ?? {};
       const unitCells = hasUnits
-        ? `<td>${escHtml(u.field ?? '')}</td><td>${escHtml(u.metric ?? '')}</td><td>${escHtml(u.laboratory ?? '')}</td>`
+        ? `<td>${escWithBreaks(u.field ?? '')}</td><td>${escWithBreaks(u.metric ?? '')}</td><td>${escWithBreaks(u.laboratory ?? '')}</td>`
         : '';
+      const typeCell  = hasType ? `<td>${escWithBreaks(paramTypes[idx])}</td>` : '';
       const hl = highlightParam && highlightParam.index === p.index ? ' class="highlight"' : '';
-      return `<tr${hl}><td>${p.index}</td><td><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${unitCells}<td>${escHtml(p.default)}</td></tr>`;
+      return `<tr data-param-index="${escHtml(String(p.index))}"${hl}><td>${p.index}</td><td><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${typeCell}${unitCells}<td>${escHtml(p.default)}</td></tr>`;
     }).join('');
     paramsHtml = `<h2>Parameters</h2>
-      <table><thead><tr><th>No.</th><th>Name</th><th>Description</th>${unitCols}<th>Default</th></tr></thead>
+      <table><thead><tr><th>No.</th><th>Name</th><th>Description</th>${typeCol}${unitCols}<th>Default</th></tr></thead>
       <tbody>${rows}</tbody></table>`;
   }
 
@@ -150,16 +191,36 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
     : '';
 
   const summaryHtml = entry.summary ? `<p>${escHtml(entry.summary)}</p>` : '';
+  const sectionsHtml = entry.sections.length
+    ? `<p class="sections">Section${entry.sections.length > 1 ? 's' : ''}: ${escHtml(entry.sections.join(', '))}</p>`
+    : '';
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${n}';">
     <style>${css}</style></head>
     <body>
       <h1><code>${escHtml(entry.name)}</code></h1>
-      <p class="sections">Section${entry.sections.length > 1 ? 's' : ''}: ${escHtml(entry.sections.join(', '))}</p>
+      ${sectionsHtml}
       ${summaryHtml}
       ${paramsHtml}
       ${exampleHtml}
+      <script nonce="${n}">
+        function highlightRow(idx) {
+          document.querySelectorAll('tr.highlight').forEach(r => r.classList.remove('highlight'));
+          if (idx === null || idx === undefined) return;
+          const target = document.querySelector('tr[data-param-index="' + CSS.escape(String(idx)) + '"]');
+          if (target) {
+            target.classList.add('highlight');
+            target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          }
+        }
+        const initial = document.querySelector('tr.highlight');
+        if (initial) initial.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        window.addEventListener('message', (e) => {
+          const msg = e.data;
+          if (msg && msg.type === 'highlight') highlightRow(msg.paramIndex);
+        });
+      </script>
     </body></html>`;
 }
 
@@ -169,6 +230,7 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
 
 class DocsViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
+  private _currentEntryName?: string;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -177,14 +239,25 @@ class DocsViewProvider implements vscode.WebviewViewProvider {
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this._view = view;
-    view.webview.options = { enableScripts: false };
+    view.webview.options = { enableScripts: true };
     view.webview.html = buildDocsHtml(null, null);
+    this._currentEntryName = undefined;
   }
 
+  // While the user is moving the cursor inside the same keyword, just send a
+  // message to swap the highlighted row instead of rebuilding the whole HTML
+  // (which forces a full webview reload).
   update(entry: KeywordEntry, param?: Parameter): void {
-    if (this._view) {
-      this._view.webview.html = buildDocsHtml(entry, param ?? null);
+    if (!this._view) return;
+    if (this._currentEntryName === entry.name) {
+      this._view.webview.postMessage({
+        type: 'highlight',
+        paramIndex: param?.index ?? null,
+      });
+      return;
     }
+    this._view.webview.html = buildDocsHtml(entry, param ?? null);
+    this._currentEntryName = entry.name;
   }
 }
 
@@ -192,11 +265,26 @@ class DocsViewProvider implements vscode.WebviewViewProvider {
 // Hover markdown builders (tooltip)
 // ---------------------------------------------------------------------------
 
-function buildKeywordHover(entry: KeywordEntry): vscode.MarkdownString {
+function buildKeywordHover(
+  entry: KeywordEntry,
+  currentSection?: string | null,
+): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
   md.isTrusted = true;
+  md.supportHtml = true;
 
-  md.appendMarkdown(`## \`${entry.name}\` — ${entry.sections.join(', ')}\n\n`);
+  if (
+    currentSection
+    && entry.sections.length > 0
+    && !entry.sections.includes(currentSection)
+  ) {
+    md.appendMarkdown(
+      `<span style="color:#cca700;">⚠ ${entry.name} is not valid in ${currentSection}; valid in: ${entry.sections.join(', ')}.</span>\n\n`,
+    );
+  }
+
+  const sectionLabel = entry.sections.length ? ` — ${entry.sections.join(', ')}` : '';
+  md.appendMarkdown(`## \`${entry.name}\`${sectionLabel}\n\n`);
   if (entry.summary) md.appendMarkdown(`${entry.summary}\n\n`);
   appendParameterTable(md, entry.parameters);
   if (entry.example) md.appendMarkdown(`**Example**\n\`\`\`\n${entry.example}\n\`\`\`\n`);
@@ -208,6 +296,8 @@ function buildParameterHover(entry: KeywordEntry, param: Parameter): vscode.Mark
   md.isTrusted = true;
   md.appendMarkdown(`**\`${entry.name}\` — parameter ${param.index}: \`${param.name}\`**\n\n`);
   md.appendMarkdown(`${param.description}\n\n`);
+  const typeLabel = paramTypeLabel(param);
+  if (typeLabel) md.appendMarkdown(`*Type: ${typeLabel}*\n\n`);
   const u = param.units ?? {};
   if (u.field || u.metric || u.laboratory) {
     md.appendMarkdown(`| Field | Metric | Laboratory |\n|-------|--------|------------|\n`);
@@ -219,18 +309,24 @@ function buildParameterHover(entry: KeywordEntry, param: Parameter): vscode.Mark
 
 function appendParameterTable(md: vscode.MarkdownString, parameters: Parameter[]): void {
   if (!parameters || parameters.length === 0) return;
+  const types = parameters.map(paramTypeLabel);
   const hasUnits = parameters.some(p => p.units && Object.keys(p.units).length > 0);
+  const hasType  = types.some(t => t.length > 0);
+  const typeHead = hasType ? ' Type |' : '';
+  const typeSep  = hasType ? '------|' : '';
   if (hasUnits) {
-    md.appendMarkdown(`**Parameters**\n\n| No. | Name | Description | Field | Metric | Lab | Default |\n|-----|------|-------------|-------|--------|-----|---------|\n`);
-    for (const p of parameters) {
+    md.appendMarkdown(`**Parameters**\n\n| No. | Name | Description |${typeHead} Field | Metric | Lab | Default |\n|-----|------|-------------|${typeSep}-------|--------|-----|---------|\n`);
+    parameters.forEach((p, i) => {
       const u = p.units || {};
-      md.appendMarkdown(`| ${p.index} | \`${p.name}\` | ${p.description} | ${u.field ?? ''} | ${u.metric ?? ''} | ${u.laboratory ?? ''} | ${p.default} |\n`);
-    }
+      const typeCell = hasType ? ` ${types[i]} |` : '';
+      md.appendMarkdown(`| ${p.index} | \`${p.name}\` | ${p.description} |${typeCell} ${u.field ?? ''} | ${u.metric ?? ''} | ${u.laboratory ?? ''} | ${p.default} |\n`);
+    });
   } else {
-    md.appendMarkdown(`**Parameters**\n\n| No. | Name | Description | Default |\n|-----|------|-------------|----------|\n`);
-    for (const p of parameters) {
-      md.appendMarkdown(`| ${p.index} | \`${p.name}\` | ${p.description} | ${p.default} |\n`);
-    }
+    md.appendMarkdown(`**Parameters**\n\n| No. | Name | Description |${typeHead} Default |\n|-----|------|-------------|${typeSep}---------|\n`);
+    parameters.forEach((p, i) => {
+      const typeCell = hasType ? ` ${types[i]} |` : '';
+      md.appendMarkdown(`| ${p.index} | \`${p.name}\` | ${p.description} |${typeCell} ${p.default} |\n`);
+    });
   }
   md.appendMarkdown('\n');
 }
@@ -337,12 +433,6 @@ function computeAlignEdits(document: vscode.TextDocument, range?: vscode.Range):
 // Folding range provider
 // ---------------------------------------------------------------------------
 
-const SECTION_KEYWORDS = [
-  'RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS',
-  'SOLUTION', 'SUMMARY', 'SCHEDULE'
-] as const;
-const SECTION_KEYWORD_SET: ReadonlySet<string> = new Set(SECTION_KEYWORDS);
-
 class OpmFlowFoldingRangeProvider implements vscode.FoldingRangeProvider {
   provideFoldingRanges(document: vscode.TextDocument): vscode.FoldingRange[] {
     const ranges: vscode.FoldingRange[] = [];
@@ -436,6 +526,26 @@ class IncludeLinkProvider implements vscode.DocumentLinkProvider {
 }
 
 // ---------------------------------------------------------------------------
+// Diagnostics — over-arity records and wrong-section keywords
+// ---------------------------------------------------------------------------
+
+function refreshDiagnostics(
+  document: vscode.TextDocument,
+  index: KeywordIndex,
+  collection: vscode.DiagnosticCollection,
+): void {
+  if (document.languageId !== 'opm-flow') return;
+  const lines = document.getText().split(/\r?\n/);
+  const diags = computeDiagnostics(lines, index).map(d => {
+    const range = new vscode.Range(d.line, d.startChar, d.line, d.endChar);
+    const out = new vscode.Diagnostic(range, d.message, vscode.DiagnosticSeverity.Warning);
+    out.source = 'OPM Flow';
+    return out;
+  });
+  collection.set(document.uri, diags);
+}
+
+// ---------------------------------------------------------------------------
 // Extension entry point
 // ---------------------------------------------------------------------------
 
@@ -488,7 +598,7 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // --- Completion provider ---
+  // --- Completion provider: keyword names at the start of a line ---
   const completionProvider = vscode.languages.registerCompletionItemProvider(
     'opm-flow',
     {
@@ -510,13 +620,78 @@ export function activate(context: vscode.ExtensionContext): void {
     ...('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''))
   );
 
+  // --- Completion provider: enum-style values inside record lines ---
+  const valueCompletionProvider = vscode.languages.registerCompletionItemProvider(
+    'opm-flow',
+    {
+      provideCompletionItems(
+        document: vscode.TextDocument,
+        position: vscode.Position
+      ): vscode.CompletionItem[] {
+        const line = document.lineAt(position).text;
+        const prefix = line.substring(0, position.character);
+        // Skip when the prefix still looks like a keyword declaration —
+        // the keyword completion provider handles that case.
+        if (/^\s*[A-Z][A-Z0-9_-]*$/.test(prefix)) return [];
+        // Skip inside line comments
+        if (/^\s*--/.test(prefix)) return [];
+
+        const kwName = findActiveKeyword(document, position);
+        if (!kwName) return [];
+        const entry = index[kwName];
+        if (!entry?.parameters?.length) return [];
+
+        const col = columnForCompletion(line, position.character);
+        const param = entry.parameters.find(p => {
+          if (p.index === col) return true;
+          if (typeof p.index === 'string') {
+            const start = Number(p.index.split('-')[0]);
+            const end   = Number(p.index.split('-')[1] || start);
+            return col >= start && col <= end;
+          }
+          return false;
+        });
+        if (!param?.options?.length) return [];
+
+        // If the cursor sits inside (or right after) a token that already
+        // starts with a single quote, the inserted `'VALUE'` should replace
+        // that whole token so we don't end up with `''VALUE'`.
+        const tokens = tokenizeLine(line);
+        const quotedTok = tokens.find(t =>
+          position.character >= t.start &&
+          position.character <= t.end &&
+          t.text.startsWith("'"),
+        );
+        const replaceRange = quotedTok
+          ? new vscode.Range(position.line, quotedTok.start, position.line, quotedTok.end)
+          : undefined;
+
+        return param.options.map(opt => {
+          const quoted = `'${opt}'`;
+          const item = new vscode.CompletionItem(quoted, vscode.CompletionItemKind.EnumMember);
+          item.insertText = quoted;
+          // Match against the bare option so typing `OP` still finds `'OPEN'`.
+          item.filterText = opt;
+          item.detail = `${kwName} parameter ${param.index}: ${param.name}`;
+          if (param.description) item.documentation = new vscode.MarkdownString(param.description);
+          if (replaceRange) item.range = replaceRange;
+          return item;
+        });
+      },
+    },
+    ...('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''))
+  );
+
   // --- Hover provider (tooltip) ---
   const hoverProvider = vscode.languages.registerHoverProvider('opm-flow', {
     provideHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | undefined {
       const line = document.lineAt(position).text;
 
       const word = wordAtPosition(document, position);
-      if (word && index[word]) return new vscode.Hover(buildKeywordHover(index[word]));
+      if (word && index[word]) {
+        const currentSection = findCurrentSection(document, position);
+        return new vscode.Hover(buildKeywordHover(index[word], currentSection));
+      }
 
       const col = columnAtCursor(line, position.character);
       if (col < 1) return undefined;
@@ -657,7 +832,22 @@ export function activate(context: vscode.ExtensionContext): void {
     new OpmFlowFoldingRangeProvider()
   );
 
-  context.subscriptions.push(completionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, includeLinkProvider, foldingProvider);
+  // --- Diagnostics: over-arity records and wrong-section keywords ---
+  const diagnostics = vscode.languages.createDiagnosticCollection('opm-flow');
+  const refreshDiags = debounce((doc: vscode.TextDocument) => {
+    refreshDiagnostics(doc, index, diagnostics);
+  }, 250);
+  for (const editor of vscode.window.visibleTextEditors) {
+    refreshDiagnostics(editor.document, index, diagnostics);
+  }
+  context.subscriptions.push(
+    diagnostics,
+    vscode.workspace.onDidOpenTextDocument(doc => refreshDiagnostics(doc, index, diagnostics)),
+    vscode.workspace.onDidChangeTextDocument(e => refreshDiags(e.document)),
+    vscode.workspace.onDidCloseTextDocument(doc => diagnostics.delete(doc.uri)),
+  );
+
+  context.subscriptions.push(completionProvider, valueCompletionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, includeLinkProvider, foldingProvider);
 }
 
 export function deactivate(): void {}

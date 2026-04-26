@@ -34,8 +34,10 @@ export function tokenizeLine(line: string): Token[] {
       i = j;
     }
 
-    const repeatMatch = text.match(/^(\d+)\*$/);
-    const columnCount = repeatMatch ? parseInt(repeatMatch[1]) : 1;
+    // N* matches "5*" alone and "5*1.0" (repeated value form); both span N
+    // record positions even though they're a single whitespace-delimited token.
+    const repeatMatch = text.match(/^(\d+)\*/);
+    const columnCount = repeatMatch ? parseInt(repeatMatch[1], 10) : 1;
     tokens.push({ text, start, end: i, columnCount });
   }
   return tokens;
@@ -51,6 +53,30 @@ export function columnAtCursor(line: string, cursorChar: number): number {
   return -1;
 }
 
+/**
+ * Like columnAtCursor, but used at completion time: when the cursor sits
+ * past all completed tokens (e.g. at the end of `'W1' 'G1' `), this
+ * returns the column the next token would occupy. The end of the *last*
+ * token at end-of-buffer counts as "still in that token" so completions
+ * keep firing while the user types its value.
+ */
+export function columnForCompletion(line: string, cursorChar: number): number {
+  const tokens = tokenizeLine(line);
+  let col = 1;
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (cursorChar < tok.start) return col;
+    if (cursorChar >= tok.start && cursorChar < tok.end) return col;
+    const isPartialAtEnd =
+      cursorChar === tok.end &&
+      i === tokens.length - 1 &&
+      cursorChar === line.length;
+    if (isPartialAtEnd) return col;
+    col += tok.columnCount;
+  }
+  return col;
+}
+
 // ---------------------------------------------------------------------------
 // Record line parser
 // ---------------------------------------------------------------------------
@@ -59,9 +85,22 @@ export const NUMERIC_TOKEN_RE = /^(\*|\d+\*|[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)
 
 export const KEYWORD_TOKEN_RE = /^[A-Z][A-Z0-9_+-]*$/;
 
-/** Number of parameter columns a record token represents (N for "N*", 1 otherwise). */
+/** Matches a line that is just a keyword declaration (with optional trailing
+ *  comment or `/`), as opposed to a record line. */
+export const KEYWORD_LINE_RE = /^\s*([A-Z][A-Z0-9_+-]{1,})\s*(?:--|\/\s*(?:--|$)|$)/;
+
+/** The eight section-marker keywords, in canonical OPM Flow order. */
+export const SECTION_KEYWORDS = [
+  'RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS',
+  'SOLUTION', 'SUMMARY', 'SCHEDULE',
+] as const;
+
+export const SECTION_KEYWORD_SET: ReadonlySet<string> = new Set(SECTION_KEYWORDS);
+
+/** Number of parameter columns a record token represents.
+ *  Matches both "N*" (defaulted) and "N*VALUE" (repeated value); both span N positions. */
 export function tokenColumnCount(token: string): number {
-  const m = token.match(/^(\d+)\*$/);
+  const m = token.match(/^(\d+)\*/);
   return m ? parseInt(m[1], 10) : 1;
 }
 
