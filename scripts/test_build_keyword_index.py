@@ -32,6 +32,7 @@ from build_keyword_index import (
     iter_paragraphs,
     load_opm_common_index,
     merge_opm_common,
+    synthesize_opm_only_entries,
     _opm_item_for_param,
     NS,
     SECTION_MAP,
@@ -656,3 +657,57 @@ class TestMergeOpmCommon:
         merge_opm_common(index, opm)
         for e in index["INCLUDE"]:
             assert e["sections_opm"] == ["RUNSPEC", "GRID", "PROPS"]
+
+    def test_expected_columns_set_from_items_count(self):
+        index = {"WELSPECS": self._manual_entry()}
+        opm = {"WELSPECS": {
+            "sections": ["SCHEDULE"],
+            "items": [{"name": f"i{i}"} for i in range(17)],
+        }}
+        merge_opm_common(index, opm)
+        assert index["WELSPECS"]["expected_columns"] == 17
+
+    def test_expected_columns_omitted_for_empty_items(self):
+        # Section-header keywords like RUNSPEC have no items
+        index = {"RUNSPEC": self._manual_entry()}
+        opm = {"RUNSPEC": {"sections": [], "items": []}}
+        merge_opm_common(index, opm)
+        assert "expected_columns" not in index["RUNSPEC"]
+
+
+class TestSynthesizeOpmOnly:
+    def test_keywords_only_in_opm_common_get_synthesized(self):
+        index: dict = {}
+        opm = {
+            "PYACTION": {
+                "sections": ["SCHEDULE"],
+                "items": [
+                    {"name": "FILE", "value_type": "STRING"},
+                    {"name": "RUN_COUNT", "value_type": "INT", "default": 1},
+                ],
+            }
+        }
+        added = synthesize_opm_only_entries(index, opm)
+        assert added == 1
+        e = index["PYACTION"]
+        assert e["name"] == "PYACTION"
+        assert e["section"] == "SCHEDULE"
+        assert e["expected_columns"] == 2
+        assert e["parameters"][0]["name"] == "FILE"
+        assert e["parameters"][0]["value_type"] == "STRING"
+        assert e["parameters"][1]["default"] == "1"
+        assert "OPM Flow keyword" in e["summary"]
+
+    def test_already_present_keywords_are_left_alone(self):
+        index = {"EXISTING": {"name": "EXISTING", "summary": "kept"}}
+        opm = {"EXISTING": {"sections": ["RUNSPEC"], "items": []}}
+        added = synthesize_opm_only_entries(index, opm)
+        assert added == 0
+        assert index["EXISTING"]["summary"] == "kept"
+
+    def test_synthesized_entry_with_no_items_has_empty_params(self):
+        index: dict = {}
+        opm = {"BARE": {"sections": ["RUNSPEC"], "items": []}}
+        synthesize_opm_only_entries(index, opm)
+        assert index["BARE"]["parameters"] == []
+        assert index["BARE"]["expected_columns"] is None

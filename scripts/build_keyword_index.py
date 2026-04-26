@@ -108,6 +108,8 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
     Mutate *index* in place, attaching opm-common authoritative data:
 
     - sections: replaced with opm-common's list when non-empty
+    - expected_columns: count of opm-common items (per record), used by
+      the extension to flag records with too many values
     - parameters: each gets optional value_type and dimension copied from
       the matching opm-common item
 
@@ -119,17 +121,22 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
         opm = opm_common_index.get(name)
         if not opm:
             continue
+        entries = entry if isinstance(entry, list) else [entry]
         # Authoritative section list (skip when opm-common has none, e.g.
         # section-header keywords like RUNSPEC).
         if opm["sections"]:
-            entries = entry if isinstance(entry, list) else [entry]
             for e in entries:
                 e["section"] = opm["sections"][0]
                 e["sections_opm"] = list(opm["sections"])
             merged_sections += 1
 
+        # Per-record expected column count (parser-truth)
+        if opm["items"]:
+            for e in entries:
+                e["expected_columns"] = len(opm["items"])
+
         # Per-parameter type/dimension
-        primary = entry[0] if isinstance(entry, list) else entry
+        primary = entries[0]
         for p in primary.get("parameters", []):
             it = _opm_item_for_param(opm["items"], p.get("index"))
             if not it:
@@ -140,6 +147,51 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
                 p["dimension"] = it["dimension"]
             merged_params += 1
     print(f"Merged opm-common: {merged_sections} keywords, {merged_params} parameters")
+
+
+def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
+    """
+    Add manual-shape entries for keywords that exist in opm-common but not
+    in the reference manual (e.g. OPM-specific keywords under 900_OPM/).
+    Returns the number of entries added.
+    """
+    added = 0
+    for name, opm in opm_common_index.items():
+        if name in index:
+            continue
+        sections = opm["sections"] or ["RUNSPEC"]
+        items = opm["items"]
+        params: list[dict] = []
+        for i, it in enumerate(items):
+            p = {
+                "index":       it.get("item", i + 1),
+                "name":        it.get("name", f"item{i + 1}"),
+                "description": it.get("comment", ""),
+                "units":       {},
+                "default":     "" if "default" not in it else str(it["default"]),
+            }
+            if "value_type" in it:
+                p["value_type"] = it["value_type"]
+            if "dimension" in it:
+                p["dimension"] = it["dimension"]
+            params.append(p)
+
+        index[name] = {
+            "name":        name,
+            "section":     sections[0],
+            "sections_opm": list(sections),
+            "supported":   True,
+            "summary":     "(OPM Flow keyword — no reference-manual entry)",
+            "description": "",
+            "parameters":  params,
+            "examples":    [],
+            "full_text":   "",
+            "source_file": "",
+            "expected_columns": len(items) if items else None,
+        }
+        added += 1
+    print(f"Synthesized {added} OPM-only entries")
+    return added
 
 
 # ---------------------------------------------------------------------------
@@ -604,7 +656,7 @@ def write_compact_json(index: dict, output_path: Path):
         SUMMARY_LIMIT = 1000
         if len(summary) > SUMMARY_LIMIT:
             summary = summary[:SUMMARY_LIMIT].rstrip() + "..."
-        compact[name] = {
+        out_entry = {
             "name":        primary["name"],
             "sections":    sections,
             "supported":   primary["supported"],
@@ -612,6 +664,10 @@ def write_compact_json(index: dict, output_path: Path):
             "parameters":  primary.get("parameters", []),
             "example":     example_text,
         }
+        expected = primary.get("expected_columns")
+        if expected:
+            out_entry["expected_columns"] = expected
+        compact[name] = out_entry
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(compact, f, separators=(",", ":"), ensure_ascii=False)
     size_kb = output_path.stat().st_size // 1024
@@ -696,6 +752,7 @@ def main():
             Path(args.opm_common_dir).expanduser().resolve()
         )
         merge_opm_common(index, opm_common_index)
+        synthesize_opm_only_entries(index, opm_common_index)
 
     write_json(index, Path(args.output))
     if args.tsv:

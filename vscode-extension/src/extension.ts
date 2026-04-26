@@ -16,6 +16,7 @@ import {
   buildHeadingAndAlignedRecords,
   tokenColumnCount,
 } from './formatting';
+import { computeArityDiagnostics } from './analysis';
 
 interface Parameter {
   index: number | string;
@@ -34,6 +35,8 @@ interface KeywordEntry {
   summary: string;
   parameters: Parameter[];
   example: string;
+  /** Per-record arity from opm-common; absent for keywords lacking parser data. */
+  expected_columns?: number;
 }
 
 type KeywordIndex = Record<string, KeywordEntry>;
@@ -453,6 +456,27 @@ class IncludeLinkProvider implements vscode.DocumentLinkProvider {
 }
 
 // ---------------------------------------------------------------------------
+// Diagnostics — flag records with too many values
+// ---------------------------------------------------------------------------
+
+function refreshArityDiagnostics(
+  document: vscode.TextDocument,
+  index: KeywordIndex,
+  collection: vscode.DiagnosticCollection,
+): void {
+  if (document.languageId !== 'opm-flow') return;
+  const lines: string[] = [];
+  for (let i = 0; i < document.lineCount; i++) lines.push(document.lineAt(i).text);
+  const diags = computeArityDiagnostics(lines, index).map(d => {
+    const range = new vscode.Range(d.line, d.startChar, d.line, d.endChar);
+    const out = new vscode.Diagnostic(range, d.message, vscode.DiagnosticSeverity.Warning);
+    out.source = 'OPM Flow';
+    return out;
+  });
+  collection.set(document.uri, diags);
+}
+
+// ---------------------------------------------------------------------------
 // Extension entry point
 // ---------------------------------------------------------------------------
 
@@ -672,6 +696,21 @@ export function activate(context: vscode.ExtensionContext): void {
   const foldingProvider = vscode.languages.registerFoldingRangeProvider(
     'opm-flow',
     new OpmFlowFoldingRangeProvider()
+  );
+
+  // --- Diagnostics: flag records with too many values ---
+  const diagnostics = vscode.languages.createDiagnosticCollection('opm-flow');
+  const refreshDiags = debounce((doc: vscode.TextDocument) => {
+    refreshArityDiagnostics(doc, index, diagnostics);
+  }, 250);
+  for (const editor of vscode.window.visibleTextEditors) {
+    refreshArityDiagnostics(editor.document, index, diagnostics);
+  }
+  context.subscriptions.push(
+    diagnostics,
+    vscode.workspace.onDidOpenTextDocument(doc => refreshArityDiagnostics(doc, index, diagnostics)),
+    vscode.workspace.onDidChangeTextDocument(e => refreshDiags(e.document)),
+    vscode.workspace.onDidCloseTextDocument(doc => diagnostics.delete(doc.uri)),
   );
 
   context.subscriptions.push(completionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, includeLinkProvider, foldingProvider);
