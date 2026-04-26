@@ -28,9 +28,9 @@ interface Parameter {
   description: string;
   units: { field?: string; metric?: string; laboratory?: string };
   default: string;
-  value_type?: string;   // INT | DOUBLE | STRING | RAW_STRING | UDA
-  dimension?: string;    // Length | Pressure | Time | …
-  options?: string[];    // valid string values (extracted from the manual)
+  value_type?: string;        // INT | DOUBLE | STRING | RAW_STRING | UDA
+  dimension?: string | string[]; // Length | Pressure | Time | … (may be a list for multi-column items)
+  options?: string[];         // valid string values (extracted from the manual)
 }
 
 interface KeywordEntry {
@@ -100,8 +100,24 @@ function escHtml(s: string): string {
 }
 
 function paramTypeLabel(p: Parameter): string {
-  if (p.value_type && p.dimension) return `${p.value_type} (${p.dimension})`;
-  return p.value_type || p.dimension || '';
+  const dim = Array.isArray(p.dimension) ? p.dimension.join(', ') : (p.dimension || '');
+  if (p.value_type && dim) return `${p.value_type} (${dim})`;
+  return p.value_type || dim || '';
+}
+
+/** HTML-escape a string and insert <wbr> break opportunities after every
+ *  `/`, `*`, `_` so dense unit/dimension labels can wrap inside narrow
+ *  table cells without the browser breaking mid-word arbitrarily. */
+function escWithBreaks(s: string): string {
+  return escHtml(s).replace(/([\/_*])/g, '$1<wbr>');
+}
+
+function nonce(): string {
+  // 16 chars of [a-z0-9]; collision-irrelevant, only used to authorize the
+  // single inline script we ship below.
+  let out = '';
+  for (let i = 0; i < 16; i++) out += Math.random().toString(36).charAt(2) || '0';
+  return out;
 }
 
 function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | null): string {
@@ -118,13 +134,16 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
     h1 { font-size: 1.15em; margin: 0 0 4px 0; }
     h2 { font-size: 1em; margin: 12px 0 4px 0; border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 2px; }
     p { margin: 4px 0 8px 0; }
-    table { border-collapse: collapse; width: 100%; font-size: 0.9em; margin-bottom: 8px; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9em; margin-bottom: 8px; table-layout: auto; }
     th {
       text-align: left; padding: 4px 6px;
       background: var(--vscode-editorGroupHeader-tabsBackground);
       border: 1px solid var(--vscode-panel-border);
     }
-    td { padding: 3px 6px; border: 1px solid var(--vscode-panel-border); vertical-align: top; }
+    td {
+      padding: 3px 6px; border: 1px solid var(--vscode-panel-border); vertical-align: top;
+      overflow-wrap: break-word;
+    }
     tr.highlight td { background: var(--vscode-editor-selectionBackground); }
     code {
       font-family: var(--vscode-editor-font-family);
@@ -151,6 +170,8 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
       <body><p class="placeholder">Move the cursor over a keyword or value to see documentation.</p></body></html>`;
   }
 
+  const n = nonce();
+
   let paramsHtml = '';
   if (entry.parameters && entry.parameters.length > 0) {
     const hasUnits = entry.parameters.some(p => p.units && Object.keys(p.units).length > 0);
@@ -160,9 +181,9 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
     const rows = entry.parameters.map(p => {
       const u = p.units ?? {};
       const unitCells = hasUnits
-        ? `<td>${escHtml(u.field ?? '')}</td><td>${escHtml(u.metric ?? '')}</td><td>${escHtml(u.laboratory ?? '')}</td>`
+        ? `<td>${escWithBreaks(u.field ?? '')}</td><td>${escWithBreaks(u.metric ?? '')}</td><td>${escWithBreaks(u.laboratory ?? '')}</td>`
         : '';
-      const typeCell  = hasType ? `<td>${escHtml(paramTypeLabel(p))}</td>` : '';
+      const typeCell  = hasType ? `<td>${escWithBreaks(paramTypeLabel(p))}</td>` : '';
       const hl = highlightParam && highlightParam.index === p.index ? ' class="highlight"' : '';
       return `<tr${hl}><td>${p.index}</td><td><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${typeCell}${unitCells}<td>${escHtml(p.default)}</td></tr>`;
     }).join('');
@@ -178,7 +199,7 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
   const summaryHtml = entry.summary ? `<p>${escHtml(entry.summary)}</p>` : '';
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${n}';">
     <style>${css}</style></head>
     <body>
       <h1><code>${escHtml(entry.name)}</code></h1>
@@ -186,6 +207,10 @@ function buildDocsHtml(entry: KeywordEntry | null, highlightParam: Parameter | n
       ${summaryHtml}
       ${paramsHtml}
       ${exampleHtml}
+      <script nonce="${n}">
+        const hl = document.querySelector('tr.highlight');
+        if (hl) hl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      </script>
     </body></html>`;
 }
 
@@ -203,7 +228,7 @@ class DocsViewProvider implements vscode.WebviewViewProvider {
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this._view = view;
-    view.webview.options = { enableScripts: false };
+    view.webview.options = { enableScripts: true };
     view.webview.html = buildDocsHtml(null, null);
   }
 
