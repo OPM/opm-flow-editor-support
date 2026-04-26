@@ -43,6 +43,14 @@ describe('tokenizeLine', () => {
     expect(tokens[0].columnCount).toBe(1);
   });
 
+  test('N*VALUE (repeated value, no space) spans N columns', () => {
+    // 3*1.5 means three columns each set to 1.5; it is a single token but
+    // covers three record positions toward arity counting.
+    const tokens = tokenizeLine('1 3*1.5 9');
+    expect(tokens.map(t => t.text)).toEqual(['1', '3*1.5', '9']);
+    expect(tokens[1].columnCount).toBe(3);
+  });
+
   test('mixed explicit values and defaults', () => {
     const tokens = tokenizeLine('1.0 2* 4.0');
     expect(tokens.map(t => t.text)).toEqual(['1.0', '2*', '4.0']);
@@ -114,6 +122,12 @@ describe('tokenColumnCount', () => {
 
   test('1* spans 1 column', () => {
     expect(tokenColumnCount('1*')).toBe(1);
+  });
+
+  test('N*VALUE form spans N columns', () => {
+    expect(tokenColumnCount('3*1.5')).toBe(3);
+    expect(tokenColumnCount('2*0')).toBe(2);
+    expect(tokenColumnCount('10*-1.0')).toBe(10);
   });
 });
 

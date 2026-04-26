@@ -103,6 +103,43 @@ def _opm_item_for_param(opm_items: list[dict], manual_index) -> Optional[dict]:
     return None
 
 
+def _covered_indices(parameters: list[dict]) -> set[int]:
+    """Return the set of 1-based record positions already covered by manual params.
+
+    A grouped index like "1-2" covers both 1 and 2; bare ints cover themselves.
+    """
+    covered: set[int] = set()
+    for p in parameters:
+        idx = p.get("index")
+        if isinstance(idx, int):
+            covered.add(idx)
+        elif isinstance(idx, str):
+            try:
+                lo, hi = (idx.split("-") + [None])[:2]
+                lo_i = int(lo)
+                hi_i = int(hi) if hi else lo_i
+                covered.update(range(lo_i, hi_i + 1))
+            except ValueError:
+                pass
+    return covered
+
+
+def _synthesize_param_from_opm_item(item: dict, position: int) -> dict:
+    """Build a manual-shape parameter dict from an opm-common item."""
+    p = {
+        "index":       item.get("item", position),
+        "name":        item.get("name", f"item{position}"),
+        "description": item.get("comment", ""),
+        "units":       {},
+        "default":     "" if "default" not in item else str(item["default"]),
+    }
+    if "value_type" in item:
+        p["value_type"] = item["value_type"]
+    if "dimension" in item:
+        p["dimension"] = item["dimension"]
+    return p
+
+
 def merge_opm_common(index: dict, opm_common_index: dict) -> None:
     """
     Mutate *index* in place, attaching opm-common authoritative data:
@@ -111,12 +148,15 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
     - expected_columns: count of opm-common items (per record), used by
       the extension to flag records with too many values
     - parameters: each gets optional value_type and dimension copied from
-      the matching opm-common item
+      the matching opm-common item, and any opm-common items not represented
+      in the manual are appended (so the per-record param list is complete
+      even when the reference manual is missing entries).
 
     Manual entries that have no opm-common counterpart are left unchanged.
     """
     merged_sections = 0
     merged_params = 0
+    appended_params = 0
     for name, entry in index.items():
         opm = opm_common_index.get(name)
         if not opm:
@@ -137,7 +177,8 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
 
         # Per-parameter type/dimension
         primary = entries[0]
-        for p in primary.get("parameters", []):
+        manual_params = primary.get("parameters", [])
+        for p in manual_params:
             it = _opm_item_for_param(opm["items"], p.get("index"))
             if not it:
                 continue
@@ -146,7 +187,29 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
             if "dimension" in it:
                 p["dimension"] = it["dimension"]
             merged_params += 1
-    print(f"Merged opm-common: {merged_sections} keywords, {merged_params} parameters")
+
+        # Backfill items the manual is missing (e.g. COMPDAT item 14 / PR).
+        # Without this, the column-header generator falls back to "COL14"
+        # and hovers can't describe the position even though opm-common
+        # knows its name and type.
+        if opm["items"]:
+            covered = _covered_indices(manual_params)
+            for pos, it in enumerate(opm["items"], 1):
+                item_pos = it.get("item", pos)
+                if item_pos in covered:
+                    continue
+                manual_params.append(_synthesize_param_from_opm_item(it, item_pos))
+                covered.add(item_pos)
+                appended_params += 1
+            manual_params.sort(key=lambda p: (
+                p["index"] if isinstance(p["index"], int)
+                else int(str(p["index"]).split("-")[0])
+            ))
+            primary["parameters"] = manual_params
+    print(
+        f"Merged opm-common: {merged_sections} keywords, "
+        f"{merged_params} parameters, {appended_params} backfilled"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -209,20 +272,10 @@ def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
             continue
         sections = list(opm["sections"])
         items = opm["items"]
-        params: list[dict] = []
-        for i, it in enumerate(items):
-            p = {
-                "index":       it.get("item", i + 1),
-                "name":        it.get("name", f"item{i + 1}"),
-                "description": it.get("comment", ""),
-                "units":       {},
-                "default":     "" if "default" not in it else str(it["default"]),
-            }
-            if "value_type" in it:
-                p["value_type"] = it["value_type"]
-            if "dimension" in it:
-                p["dimension"] = it["dimension"]
-            params.append(p)
+        params = [
+            _synthesize_param_from_opm_item(it, i + 1)
+            for i, it in enumerate(items)
+        ]
 
         entry = {
             "name":        name,

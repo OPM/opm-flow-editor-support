@@ -676,6 +676,52 @@ class TestMergeOpmCommon:
         merge_opm_common(index, opm)
         assert "expected_columns" not in index["RUNSPEC"]
 
+    def test_missing_manual_items_are_backfilled_from_opm_common(self):
+        # COMPDAT-shaped: opm-common has 14 items but the manual only documents 13.
+        # The 14th must be appended so column-header generation and hovers
+        # have a name and type for that position.
+        params = [
+            {"index": i, "name": f"P{i}", "description": "", "units": {}, "default": ""}
+            for i in range(1, 14)
+        ]
+        index = {"COMPDAT": self._manual_entry(sections=("SCHEDULE",), params=params)}
+        opm = {"COMPDAT": {
+            "sections": ["SCHEDULE"],
+            "items": [{"name": f"I{i}"} for i in range(1, 14)] + [
+                {"name": "PR", "value_type": "DOUBLE", "comment": "Pressure radius"}
+            ],
+        }}
+        merge_opm_common(index, opm)
+        merged = index["COMPDAT"]["parameters"]
+        assert len(merged) == 14
+        assert index["COMPDAT"]["expected_columns"] == 14
+        last = merged[-1]
+        assert last["index"] == 14
+        assert last["name"] == "PR"
+        assert last["value_type"] == "DOUBLE"
+        assert last["description"] == "Pressure radius"
+
+    def test_grouped_index_blocks_backfill_of_covered_positions(self):
+        # A manual param indexed "1-2" covers positions 1 and 2; opm-common
+        # items at 1 and 2 must NOT be appended as duplicates.
+        params = [
+            {"index": "1-2", "name": "GROUPED", "description": "", "units": {}, "default": ""},
+            {"index": 3, "name": "P3", "description": "", "units": {}, "default": ""},
+        ]
+        index = {"VFPPROD": self._manual_entry(sections=("SCHEDULE",), params=params)}
+        opm = {"VFPPROD": {
+            "sections": ["SCHEDULE"],
+            "items": [{"name": "A"}, {"name": "B"}, {"name": "C"}, {"name": "D"}],
+        }}
+        merge_opm_common(index, opm)
+        merged = index["VFPPROD"]["parameters"]
+        # 2 manual + 1 backfilled (item 4); items 1, 2, 3 are already covered.
+        assert len(merged) == 3
+        indices = [p["index"] for p in merged]
+        assert "1-2" in indices
+        assert 3 in indices
+        assert 4 in indices
+
 
 class TestSynthesizeOpmOnly:
     def test_keywords_only_in_opm_common_get_synthesized(self):

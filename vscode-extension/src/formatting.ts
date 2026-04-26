@@ -34,8 +34,10 @@ export function tokenizeLine(line: string): Token[] {
       i = j;
     }
 
-    const repeatMatch = text.match(/^(\d+)\*$/);
-    const columnCount = repeatMatch ? parseInt(repeatMatch[1]) : 1;
+    // N* matches "5*" alone and "5*1.0" (repeated value form); both span N
+    // record positions even though they're a single whitespace-delimited token.
+    const repeatMatch = text.match(/^(\d+)\*/);
+    const columnCount = repeatMatch ? parseInt(repeatMatch[1], 10) : 1;
     tokens.push({ text, start, end: i, columnCount });
   }
   return tokens;
@@ -95,9 +97,10 @@ export const SECTION_KEYWORDS = [
 
 export const SECTION_KEYWORD_SET: ReadonlySet<string> = new Set(SECTION_KEYWORDS);
 
-/** Number of parameter columns a record token represents (N for "N*", 1 otherwise). */
+/** Number of parameter columns a record token represents.
+ *  Matches both "N*" (defaulted) and "N*VALUE" (repeated value); both span N positions. */
 export function tokenColumnCount(token: string): number {
-  const m = token.match(/^(\d+)\*$/);
+  const m = token.match(/^(\d+)\*/);
   return m ? parseInt(m[1], 10) : 1;
 }
 
