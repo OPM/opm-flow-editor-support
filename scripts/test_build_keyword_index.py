@@ -36,6 +36,7 @@ from build_keyword_index import (
     extract_string_options,
     attach_string_options,
     _opm_item_for_param,
+    _classify_size,
     NS,
     SECTION_MAP,
 )
@@ -593,6 +594,48 @@ class TestLoadOpmCommonIndex:
         assert idx == {}
 
 
+class TestClassifySize:
+    def test_explicit_size_zero_means_none(self):
+        assert _classify_size({"size": 0}) == ("none", 0)
+
+    def test_no_size_no_items_means_none(self):
+        # Flag-style keywords like METRIC, OIL, WATER
+        assert _classify_size({}) == ("none", 0)
+
+    def test_positive_int_size_is_fixed_with_count(self):
+        assert _classify_size({"size": 4, "items": [{"name": "X"}]}) == ("fixed", 4)
+
+    def test_dict_size_is_fixed_with_unknown_count(self):
+        # Table-driven keywords (size is determined by another keyword's value)
+        # have a fixed record count but no trailing standalone '/' terminator,
+        # so they must be classified as "fixed", not "list" — otherwise the
+        # diagnostics flag legal RSVD/PVDO/etc. blocks as missing terminator.
+        opm = {"size": {"keyword": "EQLDIMS", "item": "NTEQUL"}, "items": [{"name": "DATA"}]}
+        assert _classify_size(opm) == ("fixed", None)
+
+    def test_string_size_is_list(self):
+        # VFPPROD-style: size: "UNKNOWN" — record count is genuinely unbounded.
+        opm = {"size": "UNKNOWN", "items": [{"name": "DATA"}]}
+        assert _classify_size(opm) == ("list", None)
+
+    def test_items_without_size_default_to_list(self):
+        opm = {"items": [{"name": "X"}]}
+        assert _classify_size(opm) == ("list", None)
+
+    def test_data_only_keyword_classified_as_array(self):
+        # PORO/PERMX/ACTNUM-shaped: a single "data" block with no items.
+        # These are cell-property arrays, not record lists; they must be
+        # classified as "array" so the runtime skips terminator/arity
+        # checks (each value line is not '/'-terminated, and the block
+        # has only one '/' at the end of the value stream).
+        opm = {"data": {"value_type": "DOUBLE", "dimension": "1"}}
+        assert _classify_size(opm) == ("array", None)
+
+    def test_int_data_only_keyword_classified_as_array(self):
+        opm = {"data": {"value_type": "INT"}}
+        assert _classify_size(opm) == ("array", None)
+
+
 class TestMergeOpmCommon:
     def _manual_entry(self, sections=("RUNSPEC",), params=None):
         return {
@@ -675,6 +718,22 @@ class TestMergeOpmCommon:
         opm = {"RUNSPEC": {"sections": [], "items": []}}
         merge_opm_common(index, opm)
         assert "expected_columns" not in index["RUNSPEC"]
+
+    def test_expected_columns_omitted_when_item_has_size_type_all(self):
+        # RSVD-shaped: a single ALL item (each record is a variable-length
+        # depth/Rs table). expected_columns must NOT be emitted, otherwise
+        # legal multi-pair records would be mis-flagged as over-arity.
+        index = {"RSVD": self._manual_entry(sections=("SOLUTION",))}
+        opm = {"RSVD": {
+            "sections": ["SOLUTION"],
+            "items": [{
+                "name": "DATA",
+                "size_type": "ALL",
+                "dimension": ["Length", "GasDissolutionFactor"],
+            }],
+        }}
+        merge_opm_common(index, opm)
+        assert "expected_columns" not in index["RSVD"]
 
     def test_missing_manual_items_are_backfilled_from_opm_common(self):
         # COMPDAT-shaped: opm-common has 14 items but the manual only documents 13.
@@ -760,6 +819,17 @@ class TestSynthesizeOpmOnly:
         assert index["BARE"]["parameters"] == []
         # No items → expected_columns omitted (rather than stored as None)
         assert "expected_columns" not in index["BARE"]
+
+    def test_synthesized_entry_omits_expected_columns_for_size_type_all(self):
+        # A synthesized OPM-only keyword whose only item is size_type:ALL
+        # is variable-arity per record; expected_columns must not be set.
+        index: dict = {}
+        opm = {"PYINPUT": {
+            "sections": ["SCHEDULE"],
+            "items": [{"name": "BODY", "value_type": "STRING", "size_type": "ALL"}],
+        }}
+        synthesize_opm_only_entries(index, opm)
+        assert "expected_columns" not in index["PYINPUT"]
 
     def test_synthesized_entry_with_no_sections_keeps_empty_list(self):
         # An opm-common entry with no sections (e.g. section-header keywords)

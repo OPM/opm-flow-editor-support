@@ -38,6 +38,17 @@ from lxml import etree
 OPM_COMMON_DIALECTS = ("000_Eclipse100", "001_Eclipse300", "002_Frontsim", "900_OPM")
 
 
+def _has_variable_arity_item(opm_items: list[dict]) -> bool:
+    """
+    True when any item declares ``size_type: "ALL"`` — those items consume
+    every remaining value on the record, so the record's arity is unbounded.
+    Keywords like RSVD, PVDO, PVTO use this for table data with variable row
+    count per record. A fixed ``expected_columns`` would mis-classify legal
+    records as over-arity, so callers should omit the field for these.
+    """
+    return any(it.get("size_type") == "ALL" for it in opm_items)
+
+
 def _classify_size(opm_data: dict) -> tuple[str, Optional[int]]:
     """
     Classify an opm-common keyword's record arity into (kind, count).
@@ -46,11 +57,22 @@ def _classify_size(opm_data: dict) -> tuple[str, Optional[int]]:
                Returned for explicit ``size: 0`` and for keywords with no
                ``size``, ``items``, or ``data`` (e.g. WATER, METRIC, OIL).
     - "fixed": the keyword has a fixed number of records, each terminated
-               by '/'. ``count`` is the integer record count.
+               by '/', with no trailing standalone '/' to close the block.
+               ``count`` is the integer record count when known. ``size``
+               given as a dict ``{keyword: X, item: Y}`` is also "fixed":
+               the count comes from another keyword (e.g. RSVD takes
+               ``EQLDIMS:NTEQUL`` records) but the deck still has no list
+               terminator after the last record.
     - "list":  unbounded record list. Each record terminates with '/' and
                the block itself terminates with a standalone '/'. Used for
-               ``size`` as object/string (table-driven) and for keywords
-               with ``items``/``data`` but no explicit ``size``.
+               ``size`` as a string sentinel (e.g. "UNKNOWN" on VFPPROD)
+               and for keywords with ``items`` but no explicit ``size``.
+    - "array": cell-property array (opm-common ``data`` shape). One stream
+               of values across many lines, terminated by a single '/'.
+               No per-record '/' and no separate list terminator — runtime
+               terminator/arity checks must skip these. Returned for
+               keywords with ``data`` and no ``items``/``size`` (PORO,
+               PERMX, FIPNUM, ACTNUM, …).
     """
     size = opm_data.get("size")
     has_items = bool(opm_data.get("items"))
@@ -59,10 +81,14 @@ def _classify_size(opm_data: dict) -> tuple[str, Optional[int]]:
         return "none", 0
     if isinstance(size, int) and size >= 1:
         return "fixed", size
-    if isinstance(size, (dict, str)):
+    if isinstance(size, dict):
+        return "fixed", None
+    if isinstance(size, str):
         return "list", None
-    if has_items or has_data:
+    if has_items:
         return "list", None
+    if has_data:
+        return "array", None
     return "none", 0
 
 
@@ -202,8 +228,10 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
                 e["sections_opm"] = list(opm["sections"])
             merged_sections += 1
 
-        # Per-record expected column count (parser-truth)
-        if opm["items"]:
+        # Per-record expected column count (parser-truth). Skip keywords
+        # whose items consume all remaining values (size_type: ALL) — those
+        # are inherently variable-arity (e.g. RSVD, PVDO).
+        if opm["items"] and not _has_variable_arity_item(opm["items"]):
             for e in entries:
                 e["expected_columns"] = len(opm["items"])
 
@@ -332,7 +360,7 @@ def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
             "full_text":   "",
             "source_file": "",
         }
-        if items:
+        if items and not _has_variable_arity_item(items):
             entry["expected_columns"] = len(items)
         size_kind = opm.get("size_kind")
         if size_kind:
