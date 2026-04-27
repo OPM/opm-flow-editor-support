@@ -166,6 +166,7 @@ function buildDocsHtml(
       padding: 3px 6px; border: 1px solid var(--vscode-panel-border); vertical-align: top;
       overflow-wrap: break-word;
     }
+    th.name, td.name { white-space: nowrap; overflow-wrap: normal; }
     tr.highlight td { background: var(--vscode-editor-selectionBackground); }
     code {
       font-family: var(--vscode-editor-font-family);
@@ -217,10 +218,10 @@ function buildDocsHtml(
       const typeCell    = showType    ? `<td>${escWithBreaks(paramTypes[idx])}</td>` : '';
       const defaultCell = showDefault ? `<td>${escHtml(p.default)}</td>`              : '';
       const hl = highlightParam && highlightParam.index === p.index ? ' class="highlight"' : '';
-      return `<tr data-param-index="${escHtml(String(p.index))}"${hl}><td>${p.index}</td><td><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${typeCell}${unitCells}${defaultCell}</tr>`;
+      return `<tr data-param-index="${escHtml(String(p.index))}"${hl}><td>${p.index}</td><td class="name"><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${typeCell}${unitCells}${defaultCell}</tr>`;
     }).join('');
     paramsHtml = `<h2>Parameters</h2>
-      <table><thead><tr><th>No.</th><th>Name</th><th>Description</th>${typeCol}${unitCols}${defaultCol}</tr></thead>
+      <table><thead><tr><th>No.</th><th class="name">Name</th><th>Description</th>${typeCol}${unitCols}${defaultCol}</tr></thead>
       <tbody>${rows}</tbody></table>`;
   }
 
