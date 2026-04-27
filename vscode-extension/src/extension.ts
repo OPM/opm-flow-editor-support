@@ -30,6 +30,12 @@ interface Parameter {
   value_type?: string;        // INT | DOUBLE | STRING | RAW_STRING | UDA
   dimension?: string | string[]; // Length | Pressure | Time | … (may be a list for multi-column items)
   options?: string[];         // valid string values (extracted from the manual)
+  /** 1-based record number for multi-record keywords (WELSEGS, VFPPROD, …). */
+  record?: number;
+}
+
+interface RecordMeta {
+  expected_columns?: number;
 }
 
 interface KeywordEntry {
@@ -41,6 +47,12 @@ interface KeywordEntry {
   example: string;
   /** Per-record arity from opm-common; absent for keywords lacking parser data. */
   expected_columns?: number;
+  /**
+   * Per-record metadata for multi-record keywords. When present,
+   * ``expected_columns`` is omitted and arity / column lookup must use
+   * ``records_meta[record-1].expected_columns`` for the active record.
+   */
+  records_meta?: RecordMeta[];
   /** Record-arity kind — drives missing-'/'-terminator diagnostics. */
   size_kind?: 'none' | 'fixed' | 'list' | 'array';
   /** For `size_kind: 'fixed'`, the number of records the keyword expects. */
@@ -76,6 +88,65 @@ function findActiveKeyword(document: vscode.TextDocument, position: vscode.Posit
     if (m) return m[1];
   }
   return null;
+}
+
+/**
+ * Locate the keyword line for the keyword that owns `position`. Returns
+ * -1 when no keyword precedes the position.
+ */
+function findActiveKeywordLine(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+): number {
+  for (let lineNum = position.line; lineNum >= 0; lineNum--) {
+    const text = document.lineAt(lineNum).text;
+    if (text.trim().startsWith('--')) continue;
+    if (KEYWORD_LINE_RE.test(text)) return lineNum;
+  }
+  return -1;
+}
+
+/**
+ * For a multi-record keyword, return the 1-based record number the cursor
+ * line belongs to. Records advance on each line whose last non-comment
+ * character is '/'; the count is capped at ``records_meta.length`` so the
+ * trailing variadic record absorbs all subsequent lines.
+ *
+ * Returns 1 for single-record keywords (no records_meta) so callers can
+ * always use the result.
+ */
+function findActiveRecord(
+  document: vscode.TextDocument,
+  entry: KeywordEntry,
+  position: vscode.Position,
+): number {
+  if (!entry.records_meta?.length) return 1;
+  const kwLine = findActiveKeywordLine(document, position);
+  if (kwLine < 0) return 1;
+  const total = entry.records_meta.length;
+  let record = 1;
+  for (let ln = kwLine + 1; ln < position.line; ln++) {
+    const text = document.lineAt(ln).text;
+    if (isCommentLine(text) || text.trim() === '') continue;
+    // Strip trailing '-- comment' before checking for the trailing '/'.
+    const noComment = text.replace(/\s*--.*$/, '').trimEnd();
+    if (noComment.endsWith('/')) {
+      record = Math.min(record + 1, total);
+    }
+  }
+  return record;
+}
+
+/** Filter a parameter table by record (when known) before matching by index. */
+function findParam(
+  entry: KeywordEntry,
+  record: number,
+  predicate: (p: Parameter) => boolean,
+): Parameter | undefined {
+  const candidates = entry.records_meta
+    ? entry.parameters.filter(p => (p.record ?? 1) === record)
+    : entry.parameters;
+  return candidates.find(predicate);
 }
 
 function findCurrentSection(document: vscode.TextDocument, position: vscode.Position): string | null {
@@ -155,6 +226,7 @@ function buildDocsHtml(
     }
     h1 { font-size: 1.15em; margin: 0 0 4px 0; }
     h2 { font-size: 1em; margin: 12px 0 4px 0; border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 2px; }
+    h3 { font-size: 0.95em; margin: 10px 0 4px 0; color: var(--vscode-descriptionForeground); }
     p { margin: 4px 0 8px 0; }
     table { border-collapse: collapse; width: 100%; font-size: 0.9em; margin-bottom: 8px; table-layout: auto; }
     th {
@@ -194,13 +266,14 @@ function buildDocsHtml(
   }
 
   const n = nonce();
-  const paramTypes = (entry.parameters ?? []).map(paramTypeLabel);
+  const allParams = entry.parameters ?? [];
+  const paramTypes = allParams.map(paramTypeLabel);
 
   let paramsHtml = '';
-  if (entry.parameters && entry.parameters.length > 0) {
-    const showField   = cols.field   && entry.parameters.some(p => p.units?.field);
-    const showMetric  = cols.metric  && entry.parameters.some(p => p.units?.metric);
-    const showLab     = cols.lab     && entry.parameters.some(p => p.units?.laboratory);
+  if (allParams.length > 0) {
+    const showField   = cols.field   && allParams.some(p => p.units?.field);
+    const showMetric  = cols.metric  && allParams.some(p => p.units?.metric);
+    const showLab     = cols.lab     && allParams.some(p => p.units?.laboratory);
     const showType    = cols.type    && paramTypes.some(t => t.length > 0);
     const showDefault = cols.default;
     const unitCols =
@@ -209,7 +282,8 @@ function buildDocsHtml(
       (showLab    ? '<th>Lab</th>'    : '');
     const typeCol    = showType    ? '<th>Type</th>'    : '';
     const defaultCol = showDefault ? '<th>Default</th>' : '';
-    const rows = entry.parameters.map((p, idx) => {
+
+    const renderRow = (p: Parameter, idx: number): string => {
       const u = p.units ?? {};
       const unitCells =
         (showField  ? `<td>${escWithBreaks(u.field ?? '')}</td>`      : '') +
@@ -217,12 +291,41 @@ function buildDocsHtml(
         (showLab    ? `<td>${escWithBreaks(u.laboratory ?? '')}</td>` : '');
       const typeCell    = showType    ? `<td>${escWithBreaks(paramTypes[idx])}</td>` : '';
       const defaultCell = showDefault ? `<td>${escHtml(p.default)}</td>`              : '';
-      const hl = highlightParam && highlightParam.index === p.index ? ' class="highlight"' : '';
-      return `<tr data-param-index="${escHtml(String(p.index))}"${hl}><td>${p.index}</td><td class="name"><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${typeCell}${unitCells}${defaultCell}</tr>`;
-    }).join('');
-    paramsHtml = `<h2>Parameters</h2>
-      <table><thead><tr><th>No.</th><th class="name">Name</th><th>Description</th>${typeCol}${unitCols}${defaultCol}</tr></thead>
-      <tbody>${rows}</tbody></table>`;
+      const sameRecord  = (highlightParam?.record ?? 1) === (p.record ?? 1);
+      const hl = highlightParam && highlightParam.index === p.index && sameRecord
+        ? ' class="highlight"' : '';
+      const dataRecord = p.record !== undefined
+        ? ` data-record="${escHtml(String(p.record))}"` : '';
+      return `<tr data-param-index="${escHtml(String(p.index))}"${dataRecord}${hl}><td>${p.index}</td><td class="name"><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${typeCell}${unitCells}${defaultCell}</tr>`;
+    };
+
+    const tableHead = `<thead><tr><th>No.</th><th class="name">Name</th><th>Description</th>${typeCol}${unitCols}${defaultCol}</tr></thead>`;
+
+    if (entry.records_meta?.length) {
+      // Multi-record: render one table per record so the user can see
+      // which row group each parameter belongs to.
+      const buckets = new Map<number, Parameter[]>();
+      allParams.forEach(p => {
+        const r = p.record ?? 1;
+        if (!buckets.has(r)) buckets.set(r, []);
+        buckets.get(r)!.push(p);
+      });
+      const sectionsHtmlParts: string[] = ['<h2>Parameters</h2>'];
+      for (const r of [...buckets.keys()].sort((a, b) => a - b)) {
+        const rows = buckets.get(r)!.map(p => {
+          const flatIdx = allParams.indexOf(p);
+          return renderRow(p, flatIdx);
+        }).join('');
+        sectionsHtmlParts.push(
+          `<h3>Record ${r}</h3>`
+          + `<table>${tableHead}<tbody>${rows}</tbody></table>`,
+        );
+      }
+      paramsHtml = sectionsHtmlParts.join('\n');
+    } else {
+      const rows = allParams.map((p, i) => renderRow(p, i)).join('');
+      paramsHtml = `<h2>Parameters</h2><table>${tableHead}<tbody>${rows}</tbody></table>`;
+    }
   }
 
   const exampleHtml = entry.example
@@ -244,10 +347,19 @@ function buildDocsHtml(
       ${paramsHtml}
       ${exampleHtml}
       <script nonce="${n}">
-        function highlightRow(idx) {
+        function highlightRow(idx, record) {
           document.querySelectorAll('tr.highlight').forEach(r => r.classList.remove('highlight'));
           if (idx === null || idx === undefined) return;
-          const target = document.querySelector('tr[data-param-index="' + CSS.escape(String(idx)) + '"]');
+          const ix = CSS.escape(String(idx));
+          let target = null;
+          if (record !== null && record !== undefined) {
+            target = document.querySelector(
+              'tr[data-param-index="' + ix + '"][data-record="' + CSS.escape(String(record)) + '"]'
+            );
+          }
+          if (!target) {
+            target = document.querySelector('tr[data-param-index="' + ix + '"]');
+          }
           if (target) {
             target.classList.add('highlight');
             target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -257,7 +369,7 @@ function buildDocsHtml(
         if (initial) initial.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         window.addEventListener('message', (e) => {
           const msg = e.data;
-          if (msg && msg.type === 'highlight') highlightRow(msg.paramIndex);
+          if (msg && msg.type === 'highlight') highlightRow(msg.paramIndex, msg.record);
         });
       </script>
     </body></html>`;
@@ -295,6 +407,7 @@ class DocsViewProvider implements vscode.WebviewViewProvider {
       this._view.webview.postMessage({
         type: 'highlight',
         paramIndex: param?.index ?? null,
+        record:     param?.record ?? null,
       });
       return;
     }
@@ -671,7 +784,8 @@ export function activate(context: vscode.ExtensionContext): void {
       const kwName = findActiveKeyword(editor.document, pos);
       const entry = kwName ? index[kwName] : undefined;
       if (entry) {
-        const param = entry.parameters.find(p => p.index === col);
+        const record = findActiveRecord(editor.document, entry, pos);
+        const param = findParam(entry, record, p => p.index === col);
         docsProvider.update(entry, param);
         return;
       }
@@ -738,7 +852,8 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!entry?.parameters?.length) return [];
 
         const col = columnForCompletion(line, position.character);
-        const param = entry.parameters.find(p => {
+        const record = findActiveRecord(document, entry, position);
+        const param = findParam(entry, record, p => {
           if (p.index === col) return true;
           if (typeof p.index === 'string') {
             const start = Number(p.index.split('-')[0]);
@@ -797,7 +912,8 @@ export function activate(context: vscode.ExtensionContext): void {
       const entry = index[kwName];
       if (!entry?.parameters?.length) return undefined;
 
-      const param = entry.parameters.find(p => p.index === col);
+      const record = findActiveRecord(document, entry, position);
+      const param = findParam(entry, record, p => p.index === col);
       if (!param) return undefined;
 
       return new vscode.Hover(buildParameterHover(entry, param));
@@ -845,14 +961,18 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     const { groupLines, group } = result;
     const groupStartLine = groupLines[0];
-    const kwName = findActiveKeyword(doc, new vscode.Position(groupStartLine, 0));
+    const groupPos = new vscode.Position(groupStartLine, 0);
+    const kwName = findActiveKeyword(doc, groupPos);
     const entry = kwName ? index[kwName] : undefined;
+    const record = entry ? findActiveRecord(doc, entry, groupPos) : 1;
     const tokens = group[0].tokens;
     const nCols = tokens.length;
     const names: string[] = [];
     let paramIdx = 1;
     for (const tok of tokens) {
-      const param = entry?.parameters.find(p => Number(p.index) === paramIdx);
+      const param = entry
+        ? findParam(entry, record, p => Number(p.index) === paramIdx)
+        : undefined;
       names.push(param?.name ?? `COL${paramIdx}`);
       paramIdx += tokenColumnCount(tok);
     }

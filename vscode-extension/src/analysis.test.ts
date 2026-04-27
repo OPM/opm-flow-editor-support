@@ -116,6 +116,102 @@ describe('computeDiagnostics — arity', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Multi-record arity (records_meta) — WELSEGS-style keywords
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — multi-record arity', () => {
+  // WELSEGS-shaped fixture: rec 1 has 9 expected columns, rec 2 has 12.
+  // The trailing rec 2 is variadic and absorbs all subsequent records.
+  const multiIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    WELSEGS: {
+      name: 'WELSEGS',
+      sections: ['SCHEDULE'],
+      size_kind: 'list',
+      records_meta: [
+        { expected_columns: 9 },
+        { expected_columns: 12 },
+      ],
+    },
+    // VFPPROD-shaped: rec 1 has 9 cols, rec 2 has no expected_columns
+    // (variadic ALL-arity item) — over-arity must NOT fire on rec 2.
+    VFPPROD: {
+      name: 'VFPPROD',
+      sections: ['SCHEDULE'],
+      size_kind: 'list',
+      records_meta: [
+        { expected_columns: 9 },
+        {},
+      ],
+    },
+  };
+
+  it('uses the per-record column count for the first record', () => {
+    // 10 cols on rec 1, expected 9 → over-arity.
+    const lines = [
+      'SCHEDULE',
+      'WELSEGS',
+      "'W' 100 100 1e-5 ABS HFA HO 0 0 99 /", // rec 1, 10 columns
+      '/',                                    // block terminator
+    ];
+    const diags = computeDiagnostics(lines, multiIndex);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].line).toBe(2);
+    expect(diags[0].message).toMatch(/in record 1/);
+    expect(diags[0].message).toMatch(/10 values/);
+    expect(diags[0].message).toMatch(/at most 9/);
+  });
+
+  it('uses the per-record column count for the second record', () => {
+    // Rec 1 OK (9 cols), rec 2 has 13 cols, expected 12 → over-arity.
+    const lines = [
+      'SCHEDULE',
+      'WELSEGS',
+      "'W' 100 100 1e-5 ABS HFA HO 0 0 /",            // rec 1: 9
+      '1 1 1 1 100 100 0.1 0.0001 0.01 1 0 0 99 /',  // rec 2: 13 → over
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, multiIndex);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].line).toBe(3);
+    expect(diags[0].message).toMatch(/in record 2/);
+    expect(diags[0].message).toMatch(/13 values/);
+    expect(diags[0].message).toMatch(/at most 12/);
+  });
+
+  it('keeps using the last record for repeated trailing rows (variadic)', () => {
+    // Three rec 2 rows; only the last is over-arity. The trailing record
+    // absorbs all remaining lines — none of them should be checked
+    // against rec 1's column count.
+    const lines = [
+      'SCHEDULE',
+      'WELSEGS',
+      "'W' 100 100 1e-5 ABS HFA HO 0 0 /",          // rec 1
+      '1 1 1 1 100 100 0.1 0.0001 0.01 1 0 0 /',    // rec 2 ✓
+      '2 2 1 1 200 200 0.1 0.0001 0.01 1 0 0 /',    // rec 2 ✓
+      '3 3 1 1 300 300 0.1 0.0001 0.01 1 0 0 99 /', // rec 2 over (13)
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, multiIndex);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].line).toBe(5);
+    expect(diags[0].message).toMatch(/in record 2/);
+  });
+
+  it('does not check arity on a record whose meta has no expected_columns', () => {
+    // VFPPROD rec 2 is ALL-arity: any column count is legal.
+    const lines = [
+      'SCHEDULE',
+      'VFPPROD',
+      '1 1000 LIQ WCT GOR THP GRAT METRIC BHP /', // rec 1: 9 ✓
+      '0.1 0.5 1.0 5.0 10.0 50.0 100.0 /',         // rec 2: 7, no check
+      '/',
+    ];
+    expect(computeDiagnostics(lines, multiIndex)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Section validity checks
 // ---------------------------------------------------------------------------
 

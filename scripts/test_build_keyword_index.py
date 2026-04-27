@@ -392,6 +392,45 @@ class TestParseParamTable:
         assert params[1]["description"] == "pressure desc"
         assert params[1]["default"] == "None"
 
+    def test_multi_record_table(self):
+        # WELSEGS-style: rows carry "R-P" indices spanning two records,
+        # and the synthetic Name="/" rows that document the record terminator
+        # are dropped.
+        tbl = self._param_table(
+            (   "1-1", "WELNAME", "well name", "None"),
+            (   "1-2", "TOPDEP",  "top depth", "None"),
+            (   "1-3", "/",       "row terminator", "n/a"),
+            (   "2-1", "ISEG1",   "seg 1", "None"),
+            (   "2-2", "ISEG2",   "seg 2", "None"),
+            (   "2-3", "/",       "row terminator", "n/a"),
+        )
+        elem = self._table_elem(tbl)
+        params = parse_param_table(elem)
+        # synthetic '/' rows dropped → 4 real params
+        assert len(params) == 4
+        assert [(p["record"], p["index"], p["name"]) for p in params] == [
+            (1, 1, "WELNAME"),
+            (1, 2, "TOPDEP"),
+            (2, 1, "ISEG1"),
+            (2, 2, "ISEG2"),
+        ]
+
+    def test_single_record_grouped_index_not_record_mode(self):
+        # WLIST-style: bare integer rows plus one row "3-52" meaning
+        # "positions 3 through 52 are repetitions of WELNAMES". Only one
+        # distinct first-slot record number ⇒ NOT record-mode; the index
+        # stays as the original string and no `record` field is attached.
+        tbl = self._param_table(
+            (1,      "WLIST",    "list name",       "None"),
+            (2,      "ACTION",   "action verb",     ""),
+            ("3-52", "WELNAMES", "repeated names",  ""),
+        )
+        elem = self._table_elem(tbl)
+        params = parse_param_table(elem)
+        assert len(params) == 3
+        assert params[2]["index"] == "3-52"
+        assert "record" not in params[2]
+
 
 # ---------------------------------------------------------------------------
 # parse_keyword_file — full .fodt parsing with a minimal fixture
@@ -778,6 +817,72 @@ class TestMergeOpmCommon:
         assert last["value_type"] == "DOUBLE"
         assert last["description"] == "Pressure radius"
 
+    def test_records_mode_emits_records_meta_and_groups_params(self):
+        # WELSEGS-shaped: opm-common has `records`, manual params carry
+        # `record`. Expect records_meta with per-record expected_columns
+        # and parameters grouped record-1 first, then record-2.
+        params = [
+            {"index": 1, "record": 1, "name": "WELL",      "description": "", "units": {}, "default": "None"},
+            {"index": 2, "record": 1, "name": "TOPDEP",    "description": "", "units": {}, "default": "None"},
+            {"index": 1, "record": 2, "name": "ISEG1",     "description": "", "units": {}, "default": "None"},
+            {"index": 2, "record": 2, "name": "ISEG2",     "description": "", "units": {}, "default": "None"},
+        ]
+        index = {"WELSEGS": self._manual_entry(sections=("SCHEDULE",), params=params)}
+        opm = {"WELSEGS": {
+            "sections": ["SCHEDULE"],
+            "items": [],
+            "records": [
+                [{"name": "WELL", "value_type": "STRING"},
+                 {"name": "TOPDEP", "value_type": "DOUBLE", "dimension": "Length"}],
+                [{"name": "ISEG1", "value_type": "INT"},
+                 {"name": "ISEG2", "value_type": "INT"},
+                 {"name": "BRANCH", "value_type": "INT"}],  # 3rd item missing in manual
+            ],
+            "size_kind": "list",
+            "size_count": None,
+        }}
+        merge_opm_common(index, opm)
+        e = index["WELSEGS"]
+        assert e["records_meta"] == [
+            {"expected_columns": 2},
+            {"expected_columns": 3},
+        ]
+        # No top-level expected_columns when records_meta is present
+        assert "expected_columns" not in e
+        # Parameters: 2 from rec 1 + 3 from rec 2 (one backfilled) = 5
+        names = [(p["record"], p["index"], p["name"]) for p in e["parameters"]]
+        assert names == [
+            (1, 1, "WELL"),
+            (1, 2, "TOPDEP"),
+            (2, 1, "ISEG1"),
+            (2, 2, "ISEG2"),
+            (2, 3, "BRANCH"),
+        ]
+        # Type/dimension copied from opm-common
+        assert e["parameters"][1]["dimension"] == "Length"
+
+    def test_records_mode_skips_expected_columns_for_size_type_all_records(self):
+        # VFPPROD-shaped: record 2 has a single ALL-arity item (FLOW_VALUES)
+        # consuming all values — expected_columns must NOT be set for that
+        # record so legal long records are not flagged as over-arity.
+        params = [
+            {"index": 1, "record": 1, "name": "TABLE", "description": "", "units": {}, "default": "None"},
+            {"index": 1, "record": 2, "name": "FLOW",  "description": "", "units": {}, "default": ""},
+        ]
+        index = {"VFPPROD": self._manual_entry(sections=("SCHEDULE",), params=params)}
+        opm = {"VFPPROD": {
+            "sections": ["SCHEDULE"],
+            "items": [],
+            "records": [
+                [{"name": "TABLE", "value_type": "INT"}],
+                [{"name": "FLOW", "value_type": "DOUBLE", "size_type": "ALL"}],
+            ],
+        }}
+        merge_opm_common(index, opm)
+        meta = index["VFPPROD"]["records_meta"]
+        assert meta[0] == {"expected_columns": 1}
+        assert meta[1] == {}  # ALL-arity record has no expected_columns
+
     def test_grouped_index_blocks_backfill_of_covered_positions(self):
         # A manual param indexed "1-2" covers positions 1 and 2; opm-common
         # items at 1 and 2 must NOT be appended as duplicates.
@@ -857,6 +962,30 @@ class TestSynthesizeOpmOnly:
         synthesize_opm_only_entries(index, opm)
         assert index["MYSTERY"]["sections_opm"] == []
         assert index["MYSTERY"]["section"] == ""
+
+    def test_synthesized_records_keyword(self):
+        # An OPM-only multi-record keyword: emits records_meta and
+        # parameters carry their record number. No top-level
+        # expected_columns since each record may have a different arity.
+        index: dict = {}
+        opm = {"MULTI": {
+            "sections": ["SCHEDULE"],
+            "items": [],
+            "records": [
+                [{"name": "A", "value_type": "STRING"}],
+                [{"name": "B", "value_type": "INT"},
+                 {"name": "C", "value_type": "INT"}],
+            ],
+        }}
+        synthesize_opm_only_entries(index, opm)
+        e = index["MULTI"]
+        assert e["records_meta"] == [
+            {"expected_columns": 1},
+            {"expected_columns": 2},
+        ]
+        assert "expected_columns" not in e
+        records = [(p["record"], p["index"], p["name"]) for p in e["parameters"]]
+        assert records == [(1, 1, "A"), (2, 1, "B"), (2, 2, "C")]
 
 
 class TestExtractStringOptions:
