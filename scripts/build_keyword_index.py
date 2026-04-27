@@ -677,12 +677,21 @@ def parse_keyword_file(fodt_path: Path, section: str) -> dict:
     """
     keyword_name = fodt_path.stem
 
+    # Several manual files (WELSEGS, ACTIONX, EHYSTR, RPTRST, UDQ) reuse the
+    # same xml:id on multiple <text:list> elements, which the strict parser
+    # rejects. Use the recovering parser so these keywords still produce a
+    # usable tree — content is unaffected, only the duplicate-id constraint
+    # is relaxed.
+    parser = etree.XMLParser(recover=True, huge_tree=True)
     try:
         with open(fodt_path, "rb") as f:
             data = f.read()
-        root = etree.fromstring(data)
+        root = etree.fromstring(data, parser=parser)
     except etree.XMLSyntaxError as e:
         print(f"  WARNING: XML parse error in {fodt_path.name}: {e}", file=sys.stderr)
+        return None
+    if root is None:
+        print(f"  WARNING: empty tree after recovery in {fodt_path.name}", file=sys.stderr)
         return None
 
     body = root.find(f".//{{{NS['office']}}}text")
