@@ -70,11 +70,9 @@ Squiggles in the editor catch the most common deck-shape mistakes:
   `PORO`, `PERMX`, `ACTNUM`, `OPERNUM`, `ZCORN`. The closing `/` may sit on
   its own line or trail the last value line — both forms are accepted.
 
-**Opt-out list** — keywords whose record bodies don't fit the generic model
-can be silenced wholesale. The default list contains `RPTSCHED`; edit
-`opm-flow.diagnostics.excludedKeywords` in your User or Workspace settings
-to add more (or remove the default). Names are upper-cased on read, so
-`'WCONHIST'` and `'wconhist'` both work.
+Keywords whose record bodies don't fit the generic model can be silenced
+wholesale via the `opm-flow.diagnostics.excludedKeywords` setting — see
+[Settings](#settings) below.
 
 ### Docs Panel (Sidebar)
 
@@ -167,6 +165,32 @@ INCLUDE
 **OPM Flow: Generate Keyword Reference** (Command Palette `Ctrl+Shift+P`) opens a
 Markdown document listing all keywords grouped by section — useful for uploading
 as context to an AI chat session.
+
+## Settings
+
+Configure via **File → Preferences → Settings** and search for `opm-flow`,
+or edit `settings.json` directly. All settings are scoped per-resource so
+you can override them per-workspace or per-folder.
+
+### Diagnostics
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `opm-flow.diagnostics.excludedKeywords` | `["RPTSCHED"]` | Keywords to skip in every diagnostic check. Names are upper-cased on read; matching is case-insensitive. Add keywords whose record bodies don't fit the generic model and produce noisy false positives. |
+
+### Docs sidebar and hover columns
+
+These toggles control which columns appear in the keyword docs sidebar
+and hover tooltips. Disabling unused columns gives the parameter table
+more horizontal room in narrow side panels.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `opm-flow.columns.showType` | `true` | Show the parameter Type column (value type and dimension). |
+| `opm-flow.columns.showDefault` | `true` | Show the Default column. |
+| `opm-flow.units.showField` | `true` | Show the Field unit column. |
+| `opm-flow.units.showMetric` | `true` | Show the Metric unit column. |
+| `opm-flow.units.showLab` | `true` | Show the Laboratory unit column. |
 
 ## Supported File Extensions
 
