@@ -374,6 +374,24 @@ class TestParseParamTable:
         params = parse_param_table(elem)
         assert params == []
 
+    def test_dual_name_row(self):
+        # PVTO-style table: "Name" header has span=2; rows can carry one
+        # name spanning both (e.g. RS) or two distinct names (PRSS / PRSU).
+        header = _row("No.", "Name", "Description", "Default", spans=[1, 2, 3, 1])
+        single = _row("1", "RS", "saturated GOR", "None", spans=[1, 2, 3, 1])
+        dual   = _row("2", "PRSS", "PRSU", "pressure desc", "None",
+                      spans=[1, 1, 1, 3, 1])
+        tbl    = _table(header, single, dual)
+        elem   = self._table_elem(tbl)
+        params = parse_param_table(elem)
+        assert len(params) == 2
+        assert params[0]["name"] == "RS"
+        assert params[0]["description"] == "saturated GOR"
+        assert params[0]["default"] == "None"
+        assert params[1]["name"] == "PRSS / PRSU"
+        assert params[1]["description"] == "pressure desc"
+        assert params[1]["default"] == "None"
+
 
 # ---------------------------------------------------------------------------
 # parse_keyword_file — full .fodt parsing with a minimal fixture

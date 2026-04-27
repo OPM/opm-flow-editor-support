@@ -520,18 +520,37 @@ def is_unit_row(cells: list[tuple[str, int]]) -> bool:
     )
 
 
+def _detect_name_span(raw_rows: list[list[tuple[str, int]]]) -> int:
+    """
+    Return how many logical columns the "Name" header occupies.
+
+    PVTO/PVTG/PVTGW/PVTGWO/PVTSOL use ``span=2`` because each parameter row
+    can hold a saturated/under-saturated name pair (e.g. PRSS / PRSU). All
+    other manual tables use ``span=1``.
+    """
+    for cells in raw_rows:
+        if cells and cells[0][0] == "No.":
+            for txt, span in cells[1:]:
+                if txt == "Name":
+                    return span
+            return 1
+    return 1
+
+
 def parse_param_table(table_elem) -> list[dict]:
     """
     Parse a keyword parameter table into a list of parameter dicts.
 
     Each dict has:
         index       – 1-based integer
-        name        – parameter name string
+        name        – parameter name string (joined with " / " when the row
+                      defines two related columns, e.g. "PRSS / PRSU")
         description – full description text
         units       – {"field": ..., "metric": ..., "laboratory": ...} or {}
         default     – default value string (may be empty)
     """
     raw = extract_raw_rows(table_elem)
+    name_span = _detect_name_span(raw)
     params = []
     pending_param = None
 
@@ -549,10 +568,23 @@ def parse_param_table(table_elem) -> list[dict]:
 
             raw_idx = cells[0][0].strip()
             idx: int | str = int(raw_idx) if raw_idx.isdigit() else raw_idx
-            name      = cells[1][0] if len(cells) > 1 else ""
-            # description is the cell with span=3 (index 2), default is last
-            desc      = cells[2][0] if len(cells) > 2 else ""
-            default   = cells[3][0] if len(cells) > 3 else ""
+
+            # Walk Name cells until we've covered name_span logical columns.
+            # Single-name rows use one cell with span=name_span; dual-name
+            # rows use one cell per name (each span=1).
+            cell_idx = 1
+            consumed = 0
+            name_parts: list[str] = []
+            while cell_idx < len(cells) and consumed < name_span:
+                txt, span = cells[cell_idx]
+                if txt:
+                    name_parts.append(txt)
+                consumed += span
+                cell_idx += 1
+            name = " / ".join(name_parts)
+
+            desc    = cells[cell_idx][0] if cell_idx < len(cells) else ""
+            default = cells[cell_idx + 1][0] if cell_idx + 1 < len(cells) else ""
 
             pending_param = {
                 "index":       idx,
