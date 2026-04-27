@@ -7,8 +7,6 @@ with syntax highlighting and development features backed by the full OPM Flow re
 Keyword data is built from [OPM/opm-reference-manual](https://github.com/OPM/opm-reference-manual) at commit [`85395fc0`](https://github.com/OPM/opm-reference-manual/commit/85395fc009a70d96019535bf15318150e48b090d).
 <!-- manual-ref:end -->
 
-NB! This is a beta test release
-
 ## Features
 
 ### Syntax Highlighting
@@ -102,8 +100,10 @@ from the Command Palette or the editor right-click menu. With a selection it ali
 the selected lines; without one it aligns the whole document.
 
 Groups of consecutive record lines (same token count) are reformatted in place:
-strings left-aligned, numerics (including `N*` repeat markers) right-aligned. Keyword
-headers, comment lines, the closing `/`, and trailing `-- comments` are left untouched.
+strings left-aligned, integer columns right-aligned, and float columns aligned
+on the decimal point (integers and `N*` repeat markers in a float column line
+up at the decimal point position). Keyword headers, comment lines, the closing
+`/`, and trailing `-- comments` are left untouched.
 
 `--` comment lines interspersed within a record group no longer break the group —
 every data line above and below the comment is aligned against a single shared set
@@ -125,8 +125,8 @@ MULTIPLY
 After:
 ```
 MULTIPLY
- 'PERMZ'   0.2 1 24 1 62  1  1 /
- 'PERMZ'  0.04 1 24 1 62  2  2 /
+ 'PERMZ' 0.2   1 24 1 62  1  1 /
+ 'PERMZ' 0.04  1 24 1 62  2  2 /
  'PERMZ' 0.016 1 24 1 62 18 18 /
  'PERMZ'     1 1 24 1 62 22 22 /
 /
@@ -216,6 +216,18 @@ The language is registered as `opm-flow`.
 
 ## Release Notes
 
-### x.y.z
+### 0.6.2
 
-TODO
+- Multi-record keyword support: hover, docs panel and arity diagnostics
+  resolve the parameter against the record the cursor is in for keywords
+  like `WELSEGS`, `VFPPROD`, `COMPSEGS`, `ACTIONX`, `TUNING`.
+- Diagnostics extended to flag unknown keywords, missing per-record `/`
+  terminators, and missing closing `/` on record-list and array blocks.
+- New `opm-flow.diagnostics.excludedKeywords` setting to silence
+  diagnostics for keywords whose record bodies don't fit the generic model.
+- New column-toggle settings (`opm-flow.columns.*`, `opm-flow.units.*`)
+  to hide unused columns in the docs sidebar and hover tooltips.
+- Keyword data merged from the `opm-common` submodule, with corrected
+  arity classification.
+- Recover keywords with duplicate `xml:id` from the manual and parse
+  dual-name PVT parameter rows.
