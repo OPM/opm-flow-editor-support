@@ -38,12 +38,41 @@ from lxml import etree
 OPM_COMMON_DIALECTS = ("000_Eclipse100", "001_Eclipse300", "002_Frontsim", "900_OPM")
 
 
+def _classify_size(opm_data: dict) -> tuple[str, Optional[int]]:
+    """
+    Classify an opm-common keyword's record arity into (kind, count).
+
+    - "none":  flag/section-style keyword that takes no records and no '/'.
+               Returned for explicit ``size: 0`` and for keywords with no
+               ``size``, ``items``, or ``data`` (e.g. WATER, METRIC, OIL).
+    - "fixed": the keyword has a fixed number of records, each terminated
+               by '/'. ``count`` is the integer record count.
+    - "list":  unbounded record list. Each record terminates with '/' and
+               the block itself terminates with a standalone '/'. Used for
+               ``size`` as object/string (table-driven) and for keywords
+               with ``items``/``data`` but no explicit ``size``.
+    """
+    size = opm_data.get("size")
+    has_items = bool(opm_data.get("items"))
+    has_data = "data" in opm_data
+    if size == 0:
+        return "none", 0
+    if isinstance(size, int) and size >= 1:
+        return "fixed", size
+    if isinstance(size, (dict, str)):
+        return "list", None
+    if has_items or has_data:
+        return "list", None
+    return "none", 0
+
+
 def load_opm_common_index(keywords_dir: Path) -> dict:
     """
     Walk the opm-common keywords tree and return a dict keyed by keyword name.
 
-    Each value: {"sections": [...], "items": [...]}. If a keyword appears in
-    multiple dialect dirs (uncommon in practice), the first one wins.
+    Each value: ``{"sections": [...], "items": [...], "size_kind": str,
+    "size_count": int|None}``. If a keyword appears in multiple dialect
+    dirs (uncommon in practice), the first one wins.
     """
     if not keywords_dir.exists():
         sys.exit(f"ERROR: opm-common keywords dir not found: {keywords_dir}")
@@ -67,9 +96,12 @@ def load_opm_common_index(keywords_dir: Path) -> dict:
                 name = data.get("name") or kw_file.name
                 if name in out:
                     continue
+                size_kind, size_count = _classify_size(data)
                 out[name] = {
-                    "sections": data.get("sections", []),
-                    "items":    data.get("items", []),
+                    "sections":   data.get("sections", []),
+                    "items":      data.get("items", []),
+                    "size_kind":  size_kind,
+                    "size_count": size_count,
                 }
                 total += 1
     print(f"Loaded {total} keywords from opm-common ({keywords_dir})")
@@ -174,6 +206,16 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
         if opm["items"]:
             for e in entries:
                 e["expected_columns"] = len(opm["items"])
+
+        # Record arity / terminator classification (parser-truth)
+        size_kind = opm.get("size_kind")
+        if size_kind:
+            for e in entries:
+                e["size_kind"] = size_kind
+        size_count = opm.get("size_count")
+        if size_count is not None:
+            for e in entries:
+                e["size_count"] = size_count
 
         # Per-parameter type/dimension
         primary = entries[0]
@@ -292,6 +334,12 @@ def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
         }
         if items:
             entry["expected_columns"] = len(items)
+        size_kind = opm.get("size_kind")
+        if size_kind:
+            entry["size_kind"] = size_kind
+        size_count = opm.get("size_count")
+        if size_count is not None:
+            entry["size_count"] = size_count
         index[name] = entry
         added += 1
     print(f"Synthesized {added} OPM-only entries")
@@ -782,6 +830,12 @@ def write_compact_json(index: dict, output_path: Path):
         expected = primary.get("expected_columns")
         if expected:
             out_entry["expected_columns"] = expected
+        size_kind = primary.get("size_kind")
+        if size_kind:
+            out_entry["size_kind"] = size_kind
+        size_count = primary.get("size_count")
+        if size_count is not None:
+            out_entry["size_count"] = size_count
         compact[name] = out_entry
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(compact, f, separators=(",", ":"), ensure_ascii=False)
