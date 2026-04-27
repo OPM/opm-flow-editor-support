@@ -47,6 +47,35 @@ Hovering over a **value in a data record** shows the description for that specif
 parameter column. For example, hovering over the group name in a `WELSPECS` record
 shows the `GRPNAME` parameter description, units, and default.
 
+### Diagnostics
+
+Squiggles in the editor catch the most common deck-shape mistakes:
+
+- **Unrecognised keyword** — a keyword-shaped line whose token isn't in the
+  OPM Flow vocabulary (typo of an identifier, or a custom keyword the parser
+  won't accept).
+- **Wrong section** — a keyword used outside the section(s) it's valid in,
+  e.g. `WELSPECS` placed in `RUNSPEC` instead of `SCHEDULE`. The hover lists
+  the sections where it *is* valid.
+- **Over-arity record** — a record with more values than the keyword's
+  per-record item count from the OPM Flow parser. Trailing defaults
+  (auto-defaulted by `/`) are not flagged. The squiggle starts at the first
+  offending value, including `N*` repeat tokens.
+- **Missing per-record `/`** — a record line carrying values but no closing
+  `/`, on keywords known to take records.
+- **Missing closing `/` on record-list blocks** — keywords like `WELSPECS`,
+  `COMPDAT`, `WCONHIST` that expect the block to end with a standalone `/`
+  line.
+- **Missing closing `/` on array blocks** — cell-property arrays like
+  `PORO`, `PERMX`, `ACTNUM`, `OPERNUM`, `ZCORN`. The closing `/` may sit on
+  its own line or trail the last value line — both forms are accepted.
+
+**Opt-out list** — keywords whose record bodies don't fit the generic model
+can be silenced wholesale. The default list contains `RPTSCHED`; edit
+`opm-flow.diagnostics.excludedKeywords` in your User or Workspace settings
+to add more (or remove the default). Names are upper-cased on read, so
+`'WCONHIST'` and `'wconhist'` both work.
+
 ### Docs Panel (Sidebar)
 
 Open the **Explorer** sidebar (`Ctrl+Shift+E`) and scroll down to the **OPM Keyword Reference** panel.

@@ -90,6 +90,7 @@ function lineHasRecordTerminator(text: string, lastTokenEnd: number): boolean {
 export function computeDiagnostics(
   lines: string[],
   index: AnalysisIndex,
+  excludedKeywords: ReadonlySet<string> = DIAGNOSTICS_EXCLUDED_KEYWORDS,
 ): LineDiagnostic[] {
   const out: LineDiagnostic[] = [];
   let activeKw: AnalysisEntry | null = null;
@@ -162,7 +163,7 @@ export function computeDiagnostics(
       // Keywords on the exclusion list opt out of all diagnostics: skip the
       // section-validity check here and leave activeKw null so subsequent
       // record lines are not arity- or terminator-checked.
-      if (DIAGNOSTICS_EXCLUDED_KEYWORDS.has(kw)) {
+      if (excludedKeywords.has(kw)) {
         continue;
       }
 
