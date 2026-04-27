@@ -14,9 +14,21 @@ import { DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
 /** Record-arity classification carried over from opm-common's "size" field. */
 export type SizeKind = 'none' | 'fixed' | 'list' | 'array';
 
+/**
+ * Per-record metadata for multi-record keywords (WELSEGS, VFPPROD,
+ * COMPSEGS, ACTIONX, …). Each entry corresponds to one record in
+ * deck order: records 1..N-1 are single-row, record N is variadic
+ * and absorbs all remaining record lines until the block-terminating
+ * standalone '/'.
+ */
+export interface RecordMeta {
+  expected_columns?: number;
+}
+
 export interface AnalysisEntry {
   name: string;
   expected_columns?: number;
+  records_meta?: RecordMeta[];
   /** Authoritative section list (from opm-common when available). */
   sections?: string[];
   /**
@@ -97,6 +109,11 @@ export function computeDiagnostics(
   let activeKwLine = -1;
   let activeKwIndent = 0;
   let recordCount = 0;
+  // 1-based index of the record the next record line belongs to. Bumped
+  // after each record-terminating '/' and capped at records_meta.length so
+  // the trailing variadic record absorbs all further rows (WELSEGS rec 2,
+  // VFPPROD rec 7, etc.).
+  let currentRecord = 1;
   let lastRecordLine = -1;
   let lastRecordEndChar = 0;
   let listTerminatorSeen = false;
@@ -130,6 +147,7 @@ export function computeDiagnostics(
     activeKwLine = -1;
     activeKwIndent = 0;
     recordCount = 0;
+    currentRecord = 1;
     lastRecordLine = -1;
     lastRecordEndChar = 0;
     listTerminatorSeen = false;
@@ -210,23 +228,31 @@ export function computeDiagnostics(
     const lastTok = tokens[tokens.length - 1];
     const hasTerm = lineHasRecordTerminator(text, lastTok.end);
 
-    // Arity: too many values?
-    if (activeKw.expected_columns) {
+    // Arity: too many values? For multi-record keywords the per-record
+    // column count comes from records_meta[currentRecord-1]; otherwise it's
+    // the keyword-wide expected_columns.
+    const expected =
+      activeKw.records_meta?.[currentRecord - 1]?.expected_columns
+      ?? activeKw.expected_columns;
+    if (expected) {
       let total = 0;
       let overflowStart = -1;
       for (const tok of tokens) {
-        if (overflowStart === -1 && total + tok.columnCount > activeKw.expected_columns) {
+        if (overflowStart === -1 && total + tok.columnCount > expected) {
           overflowStart = tok.start;
         }
         total += tok.columnCount;
       }
-      if (total > activeKw.expected_columns) {
+      if (total > expected) {
+        const where = activeKw.records_meta
+          ? ` in record ${currentRecord}`
+          : '';
         out.push({
           line: i,
           startChar: overflowStart,
           endChar: lastTok.end,
           message:
-            `${activeKw.name}: record has ${total} values; expected at most ${activeKw.expected_columns}.`,
+            `${activeKw.name}${where}: record has ${total} values; expected at most ${expected}.`,
         });
       }
     }
@@ -255,6 +281,11 @@ export function computeDiagnostics(
     recordCount++;
     lastRecordLine = i;
     lastRecordEndChar = lastTok.end;
+    // Per-record terminator advances to the next record (capped). The
+    // trailing variadic record stays "current" for all remaining rows.
+    if (hasTerm && activeKw.records_meta) {
+      currentRecord = Math.min(currentRecord + 1, activeKw.records_meta.length);
+    }
   }
 
   closeKw();
