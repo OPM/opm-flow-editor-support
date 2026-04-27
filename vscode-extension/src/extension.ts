@@ -40,6 +40,10 @@ interface KeywordEntry {
   example: string;
   /** Per-record arity from opm-common; absent for keywords lacking parser data. */
   expected_columns?: number;
+  /** Record-arity kind — drives missing-'/'-terminator diagnostics. */
+  size_kind?: 'none' | 'fixed' | 'list';
+  /** For `size_kind: 'fixed'`, the number of records the keyword expects. */
+  size_count?: number;
 }
 
 type KeywordIndex = Record<string, KeywordEntry>;

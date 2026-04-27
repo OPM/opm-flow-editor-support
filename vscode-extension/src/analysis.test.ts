@@ -5,11 +5,24 @@ const index: Record<string, AnalysisEntry> = {
     name: 'WELSPECS',
     expected_columns: 17,
     sections: ['SCHEDULE'],
+    size_kind: 'list',
   },
   ACTDIMS: {
     name: 'ACTDIMS',
     expected_columns: 4,
     sections: ['RUNSPEC'],
+    size_kind: 'fixed',
+  },
+  DIMENS: {
+    name: 'DIMENS',
+    expected_columns: 3,
+    sections: ['RUNSPEC'],
+    size_kind: 'fixed',
+  },
+  OIL: {
+    name: 'OIL',
+    sections: ['RUNSPEC'],
+    size_kind: 'none',
   },
   INCLUDE: {
     name: 'INCLUDE',
@@ -101,6 +114,7 @@ describe('computeDiagnostics — section validity', () => {
     const lines = [
       'RUNSPEC',
       'WELSPECS',  // wrong section
+      '/',
     ];
     const diags = computeDiagnostics(lines, index);
     expect(diags).toHaveLength(1);
@@ -113,7 +127,7 @@ describe('computeDiagnostics — section validity', () => {
   });
 
   it('does not flag a keyword in one of its valid sections', () => {
-    const lines = ['SCHEDULE', 'WELSPECS'];
+    const lines = ['SCHEDULE', 'WELSPECS', '/'];
     expect(computeDiagnostics(lines, index)).toEqual([]);
   });
 
@@ -128,12 +142,12 @@ describe('computeDiagnostics — section validity', () => {
   });
 
   it('skips section check before the first section header', () => {
-    const lines = ['WELSPECS'];
+    const lines = ['WELSPECS', '/'];
     expect(computeDiagnostics(lines, index)).toEqual([]);
   });
 
   it('points the diagnostic range at the keyword, not the indent', () => {
-    const lines = ['RUNSPEC', '   WELSPECS'];
+    const lines = ['RUNSPEC', '   WELSPECS', '/'];
     const diags = computeDiagnostics(lines, index);
     expect(diags).toHaveLength(1);
     expect(diags[0].startChar).toBe(3);
@@ -146,8 +160,96 @@ describe('computeDiagnostics — section validity', () => {
       'ACTDIMS',
       '1 2 3 4 /',
       'SCHEDULE',
-      'WELSPECS',  // now valid
+      'WELSPECS',
+      '/',
     ];
     expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Record / list terminator checks
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — terminators', () => {
+  it('flags a fixed-size record line that is missing the trailing /', () => {
+    const lines = ['RUNSPEC', 'DIMENS', '10 10 10'];
+    const diags = computeDiagnostics(lines, index);
+    const recordDiag = diags.find(d => d.message.includes('missing the terminating'));
+    expect(recordDiag).toBeDefined();
+    expect(recordDiag!.line).toBe(2);
+    expect(recordDiag!.startChar).toBe('10 10 '.length);
+    expect(recordDiag!.endChar).toBe('10 10 10'.length);
+  });
+
+  it('does not flag a fixed-size record line that ends with /', () => {
+    const lines = ['RUNSPEC', 'DIMENS', '10 10 10 /'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('flags a list-keyword block missing its terminating / before the next keyword', () => {
+    const lines = [
+      'SCHEDULE',
+      'WELSPECS',
+      "'W1' 'G' 1 1 /",
+      'INCLUDE',
+    ];
+    const diags = computeDiagnostics(lines, index);
+    const listDiag = diags.find(d => d.message.includes('close the record list'));
+    expect(listDiag).toBeDefined();
+    // Anchored at the end of the last record in the WELSPECS block
+    expect(listDiag!.line).toBe(2);
+  });
+
+  it('flags a list-keyword block missing the / at end of file', () => {
+    const lines = [
+      'SCHEDULE',
+      'WELSPECS',
+      "'W1' 'G' 1 1 /",
+    ];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => d.message.includes('close the record list'))).toBe(true);
+  });
+
+  it('does not flag a list-keyword block closed by a standalone /', () => {
+    const lines = [
+      'SCHEDULE',
+      'WELSPECS',
+      "'W1' 'G' 1 1 /",
+      '/',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('accepts a / line with a trailing comment as the list terminator', () => {
+    const lines = [
+      'SCHEDULE',
+      'WELSPECS',
+      "'W1' 'G' 1 1 /",
+      '/   -- end of WELSPECS',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('does not require / for a "none"-kind keyword like OIL', () => {
+    const lines = ['RUNSPEC', 'OIL', 'DIMENS', '10 10 10 /'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('skips terminator checks for keywords without size_kind', () => {
+    const lines = ['RUNSPEC', 'BARE', '1 2 3'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('flags both missing record terminator and missing list terminator', () => {
+    const lines = [
+      'SCHEDULE',
+      'WELSPECS',
+      "'W1' 'G' 1 1",  // record missing /
+      // no closing / before EOF either
+    ];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => d.message.includes('missing the terminating'))).toBe(true);
+    expect(diags.some(d => d.message.includes('close the record list'))).toBe(true);
   });
 });
