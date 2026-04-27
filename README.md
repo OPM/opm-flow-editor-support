@@ -59,13 +59,18 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
 - **Hover tooltips** showing all valid sections for the keyword, a summary,
   parameter table (with parameter type and dimension where known), and
   example. Hovering over a value in a data record shows the matching
-  parameter column.
+  parameter column. For multi-record keywords (`WELSEGS`, `VFPPROD`,
+  `COMPSEGS`, `ACTIONX`, `TUNING`, …) the hover resolves the parameter
+  against the record the cursor is in.
 - **Diagnostics** — squiggles flag unrecognised keywords, keywords placed in
   the wrong section (e.g. `WELSPECS` outside `SCHEDULE`), records with too
-  many values, missing per-record `/` terminators, and missing closing `/`
-  on record-list and cell-property-array blocks.
+  many values (per-record arity for multi-record keywords; the message
+  names which record overflowed), missing per-record `/` terminators,
+  and missing closing `/` on record-list and cell-property-array blocks.
 - **Docs sidebar panel** that follows the cursor — full documentation for the
   keyword under the cursor, with the active parameter row highlighted.
+  Multi-record keywords are rendered as one parameter table per record
+  with a heading per record.
 - **Collapsible sections and keywords** — fold section blocks (from one
   section keyword to the next) or individual keywords in the gutter.
 - **Align Record Columns** — tidy up record blocks so every column lines up;
@@ -73,7 +78,8 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
   the group.
 - **Add Column Headers** — insert a `--` heading comment with parameter names
   from the reference manual and align the record group to those positions
-  (idempotent).
+  (idempotent). For multi-record keywords the names come from the record
+  the group belongs to (e.g. `ISEG1`, `ISEG2`, … for a `WELSEGS` segment row).
 - **INCLUDE file navigation** — `Ctrl+click` a quoted path on an `INCLUDE`
   statement to open the referenced file.
 - **Generate Keyword Reference** — opens a Markdown document listing all
