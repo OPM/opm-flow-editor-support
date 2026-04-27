@@ -60,10 +60,10 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
   parameter table (with parameter type and dimension where known), and
   example. Hovering over a value in a data record shows the matching
   parameter column.
-- **Diagnostics** — records with too many values (more than the per-record
-  item count from the OPM Flow parser) and keywords placed in a section
-  where they are not valid (e.g. `WELSPECS` outside `SCHEDULE`) are flagged
-  as warnings.
+- **Diagnostics** — squiggles flag unrecognised keywords, keywords placed in
+  the wrong section (e.g. `WELSPECS` outside `SCHEDULE`), records with too
+  many values, missing per-record `/` terminators, and missing closing `/`
+  on record-list and cell-property-array blocks.
 - **Docs sidebar panel** that follows the cursor — full documentation for the
   keyword under the cursor, with the active parameter row highlighted.
 - **Collapsible sections and keywords** — fold section blocks (from one

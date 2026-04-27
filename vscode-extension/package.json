@@ -155,6 +155,17 @@
           "type": "boolean",
           "default": true,
           "description": "Show the Default column in the keyword docs sidebar and hover tooltips."
+        },
+        "opm-flow.diagnostics.excludedKeywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "RPTSCHED"
+          ],
+          "description": "Keywords to skip when computing diagnostics (no squiggles for unknown-keyword, wrong-section, arity, or missing-'/' checks). Names are matched case-insensitively after upper-casing — OPM Flow keywords are conventionally uppercase. Use this for keywords whose record bodies don't fit the generic record model and produce noisy false positives.",
+          "scope": "resource"
         }
       }
     }

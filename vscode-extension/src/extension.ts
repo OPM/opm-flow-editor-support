@@ -19,6 +19,7 @@ import {
   tokenColumnCount,
 } from './formatting';
 import { computeDiagnostics } from './analysis';
+import { DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
 
 interface Parameter {
   index: number | string;
@@ -605,6 +606,15 @@ class IncludeLinkProvider implements vscode.DocumentLinkProvider {
 // Diagnostics — over-arity records and wrong-section keywords
 // ---------------------------------------------------------------------------
 
+function getExcludedKeywords(resource?: vscode.Uri): ReadonlySet<string> {
+  const raw = vscode.workspace
+    .getConfiguration('opm-flow.diagnostics', resource ?? null)
+    .get<string[]>('excludedKeywords', [...DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS]);
+  // Normalise: keywords are uppercase by OPM Flow convention; tolerate
+  // mixed-case user input by upper-casing on read.
+  return new Set(raw.map(k => k.toUpperCase()));
+}
+
 function refreshDiagnostics(
   document: vscode.TextDocument,
   index: KeywordIndex,
@@ -612,7 +622,8 @@ function refreshDiagnostics(
 ): void {
   if (document.languageId !== 'opm-flow') return;
   const lines = document.getText().split(/\r?\n/);
-  const diags = computeDiagnostics(lines, index).map(d => {
+  const excluded = getExcludedKeywords(document.uri);
+  const diags = computeDiagnostics(lines, index, excluded).map(d => {
     const range = new vscode.Range(d.line, d.startChar, d.line, d.endChar);
     const out = new vscode.Diagnostic(range, d.message, vscode.DiagnosticSeverity.Warning);
     out.source = 'OPM Flow';
@@ -929,6 +940,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidOpenTextDocument(doc => refreshDiagnostics(doc, index, diagnostics)),
     vscode.workspace.onDidChangeTextDocument(e => refreshDiags(e.document)),
     vscode.workspace.onDidCloseTextDocument(doc => diagnostics.delete(doc.uri)),
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (!e.affectsConfiguration('opm-flow.diagnostics.excludedKeywords')) return;
+      for (const doc of vscode.workspace.textDocuments) {
+        refreshDiagnostics(doc, index, diagnostics);
+      }
+    }),
   );
 
   context.subscriptions.push(completionProvider, valueCompletionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, includeLinkProvider, foldingProvider);

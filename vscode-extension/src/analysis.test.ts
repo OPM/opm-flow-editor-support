@@ -396,4 +396,25 @@ describe('computeDiagnostics — excluded keywords', () => {
     const lines = ['SCHEDULE', 'RPTSCHED', "'WELLS=2' /", 'WELSPECS', '/'];
     expect(computeDiagnostics(lines, indexWithRptsched)).toEqual([]);
   });
+
+  it('honours a custom exclusion set passed to computeDiagnostics', () => {
+    // The runtime threads the user-configured set through to the engine.
+    // Same WELSPECS-in-RUNSPEC case that normally trips section-validity,
+    // but with WELSPECS placed on the exclusion set the diagnostic must
+    // be suppressed.
+    const lines = ['RUNSPEC', 'WELSPECS', '/'];
+    const custom = new Set(['WELSPECS']);
+    expect(computeDiagnostics(lines, index, custom)).toEqual([]);
+  });
+
+  it('an empty exclusion set lets RPTSCHED be diagnosed normally', () => {
+    // Sanity check the parameter is honoured even when empty: with the
+    // default it would be silenced; with an explicit empty set the
+    // section-validity diagnostic fires (the fixture pins RPTSCHED to
+    // RUNSPEC, so SCHEDULE is invalid).
+    const lines = ['SCHEDULE', 'RPTSCHED', "'WELLS=2' /", '/'];
+    const empty: ReadonlySet<string> = new Set();
+    const diags = computeDiagnostics(lines, indexWithRptsched, empty);
+    expect(diags.some(d => d.message.includes('not valid in SCHEDULE'))).toBe(true);
+  });
 });
