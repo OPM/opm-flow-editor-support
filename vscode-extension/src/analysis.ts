@@ -43,6 +43,8 @@ export interface AnalysisEntry {
    *     and arity checks must be skipped for these.
    */
   size_kind?: SizeKind;
+  /** For `size_kind: 'fixed'`, the number of records the keyword expects. */
+  size_count?: number;
 }
 
 export type AnalysisIndex = Record<string, AnalysisEntry>;
@@ -66,6 +68,26 @@ function isStandaloneTerminator(line: string): boolean {
   while (i < line.length && (line[i] === ' ' || line[i] === '\t')) i++;
   if (i >= line.length || line[i] !== '/') return false;
   return true;
+}
+
+/** True when the active keyword's record block has not yet been closed and
+ *  is still expecting more record content. Used to decide whether a line
+ *  matching `KEYWORD_LINE_RE` (a single uppercase identifier) should be
+ *  treated as a continuation record (likely an unquoted string value)
+ *  rather than the start of a new keyword. */
+function expectsMoreRecords(
+  entry: AnalysisEntry,
+  recordCount: number,
+  listTerminatorSeen: boolean,
+  arrayTerminatorSeen: boolean,
+): boolean {
+  if (entry.size_kind === 'list') return !listTerminatorSeen;
+  if (entry.size_kind === 'array') return !arrayTerminatorSeen;
+  if (entry.size_kind === 'fixed') {
+    const expected = entry.records_meta?.length ?? entry.size_count ?? 0;
+    return recordCount < expected;
+  }
+  return false;
 }
 
 /** True when, after the last value token, the line carries a '/' terminator
@@ -174,48 +196,63 @@ export function computeDiagnostics(
         continue;
       }
 
-      closeKw();
+      // A single uppercase identifier mid-block is more plausibly an
+      // unquoted string value (e.g. `INCLUDE` <newline> `PATH`) than a new
+      // keyword. If the active keyword's block is still expecting records
+      // and the token is not itself a known keyword (or excluded), fall
+      // through to record parsing instead of starting a new keyword.
+      const treatAsRecord =
+        activeKw !== null
+        && !index[kw]
+        && !excludedKeywords.has(kw)
+        && expectsMoreRecords(activeKw, recordCount, listTerminatorSeen, arrayTerminatorSeen);
 
-      // Keywords on the exclusion list opt out of all diagnostics: skip the
-      // section-validity check here and leave activeKw null so subsequent
-      // record lines are not arity- or terminator-checked.
-      if (excludedKeywords.has(kw)) {
+      if (!treatAsRecord) {
+        closeKw();
+
+        // Keywords on the exclusion list opt out of all diagnostics: skip the
+        // section-validity check here and leave activeKw null so subsequent
+        // record lines are not arity- or terminator-checked.
+        if (excludedKeywords.has(kw)) {
+          continue;
+        }
+
+        activeKw = index[kw] ?? null;
+        activeKwLine = i;
+        activeKwIndent = text.length - text.trimStart().length;
+
+        // Unknown-keyword check: the token looks like a keyword but is not in
+        // the OPM Flow vocabulary (and not on the exclusion list). Most often a
+        // typo. Flag and stop tracking — there's no parser data to validate the
+        // record body against anyway.
+        if (!activeKw) {
+          out.push({
+            line: i,
+            startChar: activeKwIndent,
+            endChar: activeKwIndent + kw.length,
+            message: `${kw} is not a recognised OPM Flow keyword.`,
+          });
+          continue;
+        }
+
+        // Section-validity check
+        if (
+          activeKw?.sections?.length &&
+          currentSection &&
+          !activeKw.sections.includes(currentSection)
+        ) {
+          out.push({
+            line: i,
+            startChar: activeKwIndent,
+            endChar: activeKwIndent + kw.length,
+            message:
+              `${kw} is not valid in ${currentSection}; valid in: ${activeKw.sections.join(', ')}.`,
+          });
+        }
         continue;
       }
-
-      activeKw = index[kw] ?? null;
-      activeKwLine = i;
-      activeKwIndent = text.length - text.trimStart().length;
-
-      // Unknown-keyword check: the token looks like a keyword but is not in
-      // the OPM Flow vocabulary (and not on the exclusion list). Most often a
-      // typo. Flag and stop tracking — there's no parser data to validate the
-      // record body against anyway.
-      if (!activeKw) {
-        out.push({
-          line: i,
-          startChar: activeKwIndent,
-          endChar: activeKwIndent + kw.length,
-          message: `${kw} is not a recognised OPM Flow keyword.`,
-        });
-        continue;
-      }
-
-      // Section-validity check
-      if (
-        activeKw?.sections?.length &&
-        currentSection &&
-        !activeKw.sections.includes(currentSection)
-      ) {
-        out.push({
-          line: i,
-          startChar: activeKwIndent,
-          endChar: activeKwIndent + kw.length,
-          message:
-            `${kw} is not valid in ${currentSection}; valid in: ${activeKw.sections.join(', ')}.`,
-        });
-      }
-      continue;
+      // else: fall through to record-line handling below — this is an
+      // unquoted string value belonging to the still-open block.
     }
 
     // Record line.
