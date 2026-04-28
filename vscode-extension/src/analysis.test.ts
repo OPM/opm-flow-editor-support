@@ -337,6 +337,29 @@ describe('computeDiagnostics — terminators', () => {
     expect(computeDiagnostics(lines, index)).toEqual([]);
   });
 
+  it('accepts a / line with bare trailing text as the list terminator', () => {
+    // Issue #9: text after '/' is treated as a comment with or without '--'.
+    const lines = [
+      'SCHEDULE',
+      'WELSPECS',
+      "'W1' 'G' 1 1 /",
+      '/   end of WELSPECS',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('accepts bare trailing text after a per-record /', () => {
+    // Issue #9: trailing text after a per-record '/' is also a comment.
+    const lines = [
+      'SCHEDULE',
+      'WELSPECS',
+      "'W1' 'G' 1 1 / first well",
+      "'W2' 'G' 2 2 / (2) second well",
+      '/',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
   it('does not require / for a "none"-kind keyword like OIL', () => {
     const lines = ['RUNSPEC', 'OIL', 'DIMENS', '10 10 10 /'];
     expect(computeDiagnostics(lines, index)).toEqual([]);
