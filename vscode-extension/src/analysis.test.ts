@@ -485,6 +485,73 @@ describe('computeDiagnostics — unknown keywords', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Unquoted strings — single-identifier lines mid-block (issue #8)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — unquoted string values', () => {
+  // INCLUDE-shaped fixture: fixed/1, takes one STRING parameter.
+  const stringIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    INCFIX: {
+      name: 'INCFIX',
+      sections: ['RUNSPEC'],
+      size_kind: 'fixed',
+      size_count: 1,
+      expected_columns: 1,
+    },
+    // List-shaped: each record may carry a single (string) value.
+    LICENSES: {
+      name: 'LICENSES',
+      sections: ['RUNSPEC'],
+      size_kind: 'list',
+      expected_columns: 1,
+    },
+  };
+
+  it('does not flag an unquoted string value as an unknown keyword (fixed/1)', () => {
+    // INCFIX expects 1 record. A bare uppercase identifier after the
+    // keyword is plausibly an unquoted string value, not a typo'd keyword.
+    const lines = ['RUNSPEC', 'INCFIX', 'PATH /'];
+    expect(computeDiagnostics(lines, stringIndex)).toEqual([]);
+  });
+
+  it('treats an unquoted single-identifier line as an unquoted string in a list block', () => {
+    const lines = [
+      'RUNSPEC',
+      'LICENSES',
+      'TOKEN1 /',
+      'TOKEN2 /',
+      '/',
+    ];
+    expect(computeDiagnostics(lines, stringIndex)).toEqual([]);
+  });
+
+  it('still flags a real typo when no record block is open', () => {
+    // No active block at the top of the file → the unknown-keyword
+    // diagnostic remains useful for typos.
+    const lines = ['RUNSPEC', 'WELSPECZ'];
+    const diags = computeDiagnostics(lines, stringIndex);
+    expect(diags.some(d => d.message.includes('WELSPECZ'))).toBe(true);
+  });
+
+  it('still treats a real keyword as a keyword even mid-block', () => {
+    // INCLUDE is in the index, so it's a real keyword and closes the
+    // previous (unterminated) block instead of being absorbed as a value.
+    const lines = ['RUNSPEC', 'INCFIX', 'INCLUDE'];
+    const diags = computeDiagnostics(lines, stringIndex);
+    expect(diags.some(d => d.message.includes('INCLUDE is not a recognised'))).toBe(false);
+  });
+
+  it('still flags a typo once the block is finished', () => {
+    // After INCFIX's single record terminates with '/', the block is done.
+    // A subsequent unknown identifier IS a typo, not a string value.
+    const lines = ['RUNSPEC', 'INCFIX', 'PATH /', 'TYPO'];
+    const diags = computeDiagnostics(lines, stringIndex);
+    expect(diags.some(d => d.message.includes('TYPO is not a recognised'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Exclusion list — keywords opted out of diagnostics (e.g. RPTSCHED)
 // ---------------------------------------------------------------------------
 
