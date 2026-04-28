@@ -32,6 +32,19 @@ pane. Keywords that are valid in every section (e.g. `INCLUDE`, `ECHO`) list
 them all. Completions are triggered when typing uppercase letters at the start
 of a line.
 
+### Parameter Value Completion
+
+Inside a record, when the parameter at the current column has a known set of
+string options, the suggestion list shows them with a one-line description per
+option. For example, on a `COMPDAT` record the `STATUS` column offers
+`OPEN`, `SHUT`, and `AUTO`. Multi-record keywords resolve the parameter against
+the record the cursor is in, so each record gets the right option list.
+
+To activate the list, position the cursor in the parameter column and either
+start typing an uppercase letter (e.g. `O` for `OPEN`) or press
+`Ctrl+Space` (`Cmd+Space` on macOS) to open the suggestions manually. Selecting
+an option inserts the value quoted, e.g. `'OPEN'`.
+
 ### Hover Tooltips
 
 Hover over any keyword to see a quick tooltip with:
