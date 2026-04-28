@@ -58,16 +58,14 @@ export interface LineDiagnostic {
 }
 
 /** True when the line, after leading whitespace, is just '/' (optionally
- *  followed by '--' comment). Such a line acts as the list terminator for
- *  a record-list keyword. */
+ *  followed by trailing text — either a '--' comment or any free-form text,
+ *  which OPM Flow likewise treats as a comment). Such a line acts as the
+ *  list terminator for a record-list keyword. */
 function isStandaloneTerminator(line: string): boolean {
   let i = 0;
   while (i < line.length && (line[i] === ' ' || line[i] === '\t')) i++;
   if (i >= line.length || line[i] !== '/') return false;
-  i++;
-  while (i < line.length && (line[i] === ' ' || line[i] === '\t')) i++;
-  if (i >= line.length) return true;
-  return line[i] === '-' && line[i + 1] === '-';
+  return true;
 }
 
 /** True when, after the last value token, the line carries a '/' terminator

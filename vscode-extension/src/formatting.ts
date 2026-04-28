@@ -150,7 +150,10 @@ export function parseRecordLine(line: string): RecordLine | null {
   }
 
   const rest = line.substring(i).replace(/^[ \t]+/, '').trimEnd();
-  if (rest && !rest.startsWith('--')) return null;
+  // Anything after the terminating '/' is treated as a free-form trailing
+  // comment, with or without the '--' prefix. Without a terminator only
+  // a '--' comment may follow the tokens.
+  if (rest && !hasTerminator && !rest.startsWith('--')) return null;
   return { indent, tokens, trailComment: rest, hasTerminator };
 }
 

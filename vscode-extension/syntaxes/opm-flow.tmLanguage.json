@@ -51,8 +51,11 @@
       "match": "(?<![A-Za-z_])[-+]?[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?(?![A-Za-z_*])"
     },
     "terminators": {
-      "name": "punctuation.terminator.opm-flow",
-      "match": "^\\s*/\\s*$|(?<=\\S)\\s*/"
+      "match": "((?<=\\S)\\s*/|^\\s*/)(.*)$",
+      "captures": {
+        "1": { "name": "punctuation.terminator.opm-flow" },
+        "2": { "name": "comment.line.terminator-trailing.opm-flow" }
+      }
     }
   }
 }

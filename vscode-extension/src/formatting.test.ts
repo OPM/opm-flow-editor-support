@@ -189,6 +189,24 @@ describe('parseRecordLine', () => {
     expect(r!.hasTerminator).toBe(true);
   });
 
+  test('record with bare trailing comment after / (no -- prefix)', () => {
+    // OPM Flow accepts any free-form text after the '/' record terminator
+    // as a comment, with or without the '--' prefix. See issue #9.
+    const r = parseRecordLine('1.0 2.0 / also a comment');
+    expect(r).not.toBeNull();
+    expect(r!.tokens).toEqual(['1.0', '2.0']);
+    expect(r!.trailComment).toBe('also a comment');
+    expect(r!.hasTerminator).toBe(true);
+  });
+
+  test('record with parenthesised bare trailing comment after /', () => {
+    const r = parseRecordLine("'D-2H' 'OPEN' / (2) also a comment");
+    expect(r).not.toBeNull();
+    expect(r!.tokens).toEqual(["'D-2H'", "'OPEN'"]);
+    expect(r!.trailComment).toBe('(2) also a comment');
+    expect(r!.hasTerminator).toBe(true);
+  });
+
   test('keyword-only line (uppercase word) returns null', () => {
     expect(parseRecordLine('WELSPECS')).toBeNull();
     expect(parseRecordLine('GRID')).toBeNull();
