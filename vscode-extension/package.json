@@ -156,6 +156,18 @@
           "default": true,
           "description": "Show the Default column in the keyword docs sidebar and hover tooltips."
         },
+        "opm-flow.completion.stringValueStyle": {
+          "type": "string",
+          "enum": ["both", "quoted", "unquoted"],
+          "enumDescriptions": [
+            "Offer each option twice — bare and single-quoted (e.g. OPEN and 'OPEN').",
+            "Offer only the single-quoted form (e.g. 'OPEN').",
+            "Offer only the bare unquoted form (e.g. OPEN)."
+          ],
+          "default": "quoted",
+          "description": "How STRING-typed parameter values appear in the suggestion list. OPM Flow accepts either form, so this is a style preference. Inside an existing quoted token (e.g. when editing 'OPE') only the quoted form is offered regardless of this setting.",
+          "scope": "resource"
+        },
         "opm-flow.diagnostics.excludedKeywords": {
           "type": "array",
           "items": {

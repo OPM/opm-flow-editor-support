@@ -877,16 +877,38 @@ export function activate(context: vscode.ExtensionContext): void {
           ? new vscode.Range(position.line, quotedTok.start, position.line, quotedTok.end)
           : undefined;
 
-        return param.options.map(opt => {
-          const quoted = `'${opt}'`;
-          const item = new vscode.CompletionItem(quoted, vscode.CompletionItemKind.EnumMember);
-          item.insertText = quoted;
-          // Match against the bare option so typing `OP` still finds `'OPEN'`.
+        // Inside an existing quoted token only the quoted form makes sense
+        // (replacing inside `'OPE'` with a bare value would yield `''OPE'`).
+        // Otherwise honour the user's `stringValueStyle` preference.
+        const style = vscode.workspace
+          .getConfiguration('opm-flow.completion', document.uri)
+          .get<'both' | 'quoted' | 'unquoted'>('stringValueStyle', 'quoted');
+
+        const detail = `${kwName} parameter ${param.index}: ${param.name}`;
+        const documentation = param.description
+          ? new vscode.MarkdownString(param.description)
+          : undefined;
+
+        const makeItem = (insert: string, opt: string, formRank: string): vscode.CompletionItem => {
+          const item = new vscode.CompletionItem(insert, vscode.CompletionItemKind.EnumMember);
+          item.insertText = insert;
+          // Match against the bare option so typing `OP` finds both `OPEN` and `'OPEN'`.
           item.filterText = opt;
-          item.detail = `${kwName} parameter ${param.index}: ${param.name}`;
-          if (param.description) item.documentation = new vscode.MarkdownString(param.description);
+          // Sort by option then form, so each option's bare/quoted pair stays grouped.
+          item.sortText = `${opt}${formRank}`;
+          item.detail = detail;
+          if (documentation) item.documentation = documentation;
           if (replaceRange) item.range = replaceRange;
           return item;
+        };
+
+        return param.options.flatMap(opt => {
+          const quoted = makeItem(`'${opt}'`, opt, '1');
+          if (quotedTok) return [quoted];
+          const bare = makeItem(opt, opt, '0');
+          if (style === 'quoted') return [quoted];
+          if (style === 'unquoted') return [bare];
+          return [bare, quoted];
         });
       },
     },

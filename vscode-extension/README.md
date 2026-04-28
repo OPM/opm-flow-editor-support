@@ -191,6 +191,12 @@ you can override them per-workspace or per-folder.
 | --- | --- | --- |
 | `opm-flow.diagnostics.excludedKeywords` | `["RPTSCHED"]` | Keywords to skip in every diagnostic check. Names are upper-cased on read; matching is case-insensitive. Add keywords whose record bodies don't fit the generic model and produce noisy false positives. |
 
+### Completion
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `opm-flow.completion.stringValueStyle` | `"quoted"` | How STRING-typed parameter values appear in the suggestion list. `"quoted"` shows only `'OPEN'`; `"unquoted"` shows only `OPEN`; `"both"` shows each option twice (e.g. `OPEN` and `'OPEN'`). Inside an existing quoted token only the quoted form is offered regardless of this setting. |
+
 ### Docs sidebar and hover columns
 
 These toggles control which columns appear in the keyword docs sidebar
