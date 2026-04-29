@@ -435,6 +435,7 @@ class DocsViewProvider implements vscode.WebviewViewProvider {
 function buildKeywordHover(
   entry: KeywordEntry,
   currentSection?: string | null,
+  isExcluded?: boolean,
 ): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
   md.isTrusted = true;
@@ -447,6 +448,13 @@ function buildKeywordHover(
   ) {
     md.appendMarkdown(
       `<span style="color:#cca700;">⚠ ${entry.name} is not valid in ${currentSection}; valid in: ${entry.sections.join(', ')}.</span>\n\n`,
+    );
+  }
+
+  if (isExcluded) {
+    md.appendMarkdown(
+      `<span style="color:#cca700;">ℹ ${entry.name} is on the diagnostics exclusion list `
+      + `(\`opm-flow.diagnostics.excludedKeywords\`); arity, terminator, and section checks are skipped for this keyword.</span>\n\n`,
     );
   }
 
@@ -921,9 +929,25 @@ export function activate(context: vscode.ExtensionContext): void {
       const line = document.lineAt(position).text;
 
       const word = wordAtPosition(document, position);
+      const excluded = getExcludedKeywords(document.uri);
       if (word && index[word]) {
         const currentSection = findCurrentSection(document, position);
-        return new vscode.Hover(buildKeywordHover(index[word], currentSection));
+        return new vscode.Hover(
+          buildKeywordHover(index[word], currentSection, excluded.has(word)),
+        );
+      }
+
+      // Excluded keyword not in the index: still show a short notice so the
+      // user knows why no diagnostics or docs appear on it.
+      if (word && excluded.has(word)) {
+        const md = new vscode.MarkdownString();
+        md.supportHtml = true;
+        md.appendMarkdown(`## \`${word}\`\n\n`);
+        md.appendMarkdown(
+          `<span style="color:#cca700;">ℹ ${word} is on the diagnostics exclusion list `
+          + `(\`opm-flow.diagnostics.excludedKeywords\`); arity, terminator, and section checks are skipped for this keyword.</span>`,
+        );
+        return new vscode.Hover(md);
       }
 
       const col = columnAtCursor(line, position.character);
