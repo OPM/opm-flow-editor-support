@@ -255,9 +255,15 @@ describe('computeDiagnostics — section validity', () => {
   it('points the diagnostic range at the keyword, not the indent', () => {
     const lines = ['RUNSPEC', '   WELSPECS', '/'];
     const diags = computeDiagnostics(lines, index);
-    expect(diags).toHaveLength(1);
-    expect(diags[0].startChar).toBe(3);
-    expect(diags[0].endChar).toBe(3 + 'WELSPECS'.length);
+    // Two issues: indented (column-1) and wrong section. Both anchor at
+    // the keyword token, not the leading whitespace.
+    expect(diags).toHaveLength(2);
+    for (const d of diags) {
+      expect(d.startChar).toBe(3);
+      expect(d.endChar).toBe(3 + 'WELSPECS'.length);
+    }
+    expect(diags.some(d => d.message.includes('not valid in RUNSPEC'))).toBe(true);
+    expect(diags.some(d => d.message.includes('start in column 1'))).toBe(true);
   });
 
   it('updates the active section when a new section keyword appears', () => {
@@ -481,6 +487,104 @@ describe('computeDiagnostics — unknown keywords', () => {
     const diags = computeDiagnostics(lines, index);
     expect(diags).toHaveLength(1);
     expect(diags[0].message).toMatch(/WELSPECZ/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Column-1 — keywords must start in column 1
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — column-1', () => {
+  it('flags an indented section keyword', () => {
+    const lines = ['  RUNSPEC'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].line).toBe(0);
+    expect(diags[0].startChar).toBe(2);
+    expect(diags[0].endChar).toBe(2 + 'RUNSPEC'.length);
+    expect(diags[0].message).toMatch(/RUNSPEC/);
+    expect(diags[0].message).toMatch(/start in column 1/);
+  });
+
+  it('flags an indented known keyword', () => {
+    const lines = ['SCHEDULE', '\tWELSPECS', '/'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].line).toBe(1);
+    expect(diags[0].startChar).toBe(1);
+    expect(diags[0].endChar).toBe(1 + 'WELSPECS'.length);
+    expect(diags[0].message).toMatch(/start in column 1/);
+  });
+
+  it('does not flag a keyword that starts in column 1', () => {
+    const lines = ['RUNSPEC', 'ACTDIMS', '1 2 3 4 /'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('does not duplicate the column-1 message on an unknown indented token', () => {
+    // Unknown indented tokens already get the "not recognised" diagnostic;
+    // we don't pile on a column-1 message because the user's first task is
+    // to fix the typo.
+    const lines = ['RUNSPEC', '   FOOBAR'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toMatch(/not a recognised/);
+  });
+
+  it('flags an indented excluded keyword', () => {
+    // Excluded keywords still need to start in column 1 to be recognised.
+    const lines = ['SCHEDULE', '  RPTSCHED', "'WELLS=2' /", '/'];
+    const custom = new Set(['RPTSCHED']);
+    const diags = computeDiagnostics(lines, index, custom);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toMatch(/RPTSCHED/);
+    expect(diags[0].message).toMatch(/start in column 1/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Uppercase — keywords must be in capital case
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — uppercase', () => {
+  it('flags a fully lowercase keyword whose uppercase form is known', () => {
+    const lines = ['SCHEDULE', 'welspecs', '/'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].line).toBe(1);
+    expect(diags[0].startChar).toBe(0);
+    expect(diags[0].endChar).toBe('welspecs'.length);
+    expect(diags[0].message).toMatch(/WELSPECS/);
+    expect(diags[0].message).toMatch(/capital case/);
+  });
+
+  it('flags a mixed-case section keyword', () => {
+    const lines = ['Runspec'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toMatch(/RUNSPEC/);
+    expect(diags[0].message).toMatch(/capital case/);
+  });
+
+  it('does not flag a lowercase identifier that is not a real keyword', () => {
+    // Without authoritative knowledge that the upper-cased form is a real
+    // keyword, the line might be a legitimate value or label — stay quiet.
+    const lines = ['RUNSPEC', 'pathlike'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('subsequent records are not arity-checked against the discarded keyword', () => {
+    // The lowercase token is discarded (closeKw); records that follow are
+    // not interpreted against an active block.
+    const lines = ['RUNSPEC', 'actdims', '1 2 3 4 5 6'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toMatch(/capital case/);
+  });
+
+  it('does not flag uppercase keywords', () => {
+    const lines = ['SCHEDULE', 'WELSPECS', '/'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
   });
 });
 

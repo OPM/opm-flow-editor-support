@@ -66,7 +66,9 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
   the wrong section (e.g. `WELSPECS` outside `SCHEDULE`), records with too
   many values (per-record arity for multi-record keywords; the message
   names which record overflowed), missing per-record `/` terminators,
-  and missing closing `/` on record-list and cell-property-array blocks.
+  missing closing `/` on record-list and cell-property-array blocks,
+  keywords not starting in column 1, and keywords typed in non-uppercase
+  form — both of which OPM Flow itself silently fails to recognise.
 - **Docs sidebar panel** that follows the cursor — full documentation for the
   keyword under the cursor, with the active parameter row highlighted.
   Multi-record keywords are rendered as one parameter table per record

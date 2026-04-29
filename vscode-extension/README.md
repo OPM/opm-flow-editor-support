@@ -80,6 +80,12 @@ Squiggles in the editor catch the most common deck-shape mistakes:
 - **Missing closing `/` on array blocks** — cell-property arrays like
   `PORO`, `PERMX`, `ACTNUM`, `OPERNUM`, `ZCORN`. The closing `/` may sit on
   its own line or trail the last value line — both forms are accepted.
+- **Indented keyword** — a recognised keyword that doesn't start in column 1.
+  Per the OPM Flow reference manual, indented keywords are silently ignored
+  by the simulator.
+- **Lowercase keyword** — a line shaped like a keyword declaration whose
+  upper-cased form is a known keyword. The reference manual states that
+  lowercase keywords produce errors at simulation time.
 
 Keywords whose record bodies don't fit the generic model can be silenced
 wholesale via the `opm-flow.diagnostics.excludedKeywords` setting — see

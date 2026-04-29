@@ -7,6 +7,7 @@ import {
   tokenizeLine,
   isCommentLine,
   KEYWORD_LINE_RE,
+  KEYWORD_LINE_LOOSE_RE,
   SECTION_KEYWORD_SET,
 } from './formatting';
 import { DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
@@ -118,6 +119,11 @@ function lineHasRecordTerminator(text: string, lastTokenEnd: number): boolean {
  * - **Array terminator**: an `array`-kind keyword block (cell-property
  *   stream) that is not closed by a `/` — accepted either standalone or
  *   trailing on the last value line — before the next keyword.
+ * - **Column-1**: a recognised keyword (section, indexed, or excluded) that
+ *   is indented. OPM Flow only recognises keywords that start in column one.
+ * - **Uppercase**: a line shaped like a keyword declaration but written with
+ *   lowercase letters, where the upper-cased form is a recognised keyword.
+ *   Lowercase keywords are not recognised by OPM Flow.
  */
 export function computeDiagnostics(
   lines: string[],
@@ -186,11 +192,44 @@ export function computeDiagnostics(
       continue;
     }
 
+    // Lowercase-keyword check: a line shaped like a keyword declaration whose
+    // upper-cased form is a recognised keyword. OPM Flow silently ignores
+    // such lines, so they need to be surfaced.
+    const looseMatch = text.match(KEYWORD_LINE_LOOSE_RE);
+    if (looseMatch) {
+      const tok = looseMatch[1];
+      const upper = tok.toUpperCase();
+      const isRecognised =
+        SECTION_KEYWORD_SET.has(upper)
+        || index[upper] !== undefined
+        || excludedKeywords.has(upper);
+      if (tok !== upper && isRecognised) {
+        const indent = text.length - text.trimStart().length;
+        out.push({
+          line: i,
+          startChar: indent,
+          endChar: indent + tok.length,
+          message: `${upper}: keywords must be in capital case; lowercase keywords are not recognised by OPM Flow.`,
+        });
+        closeKw();
+        continue;
+      }
+    }
+
     const m = text.match(KEYWORD_LINE_RE);
     if (m) {
       const kw = m[1];
+      const indent = text.length - text.trimStart().length;
 
       if (SECTION_KEYWORD_SET.has(kw)) {
+        if (indent > 0) {
+          out.push({
+            line: i,
+            startChar: indent,
+            endChar: indent + kw.length,
+            message: `${kw}: keywords must start in column 1; indented keywords are not recognised by OPM Flow.`,
+          });
+        }
         closeKw();
         currentSection = kw;
         continue;
@@ -210,6 +249,18 @@ export function computeDiagnostics(
       if (!treatAsRecord) {
         closeKw();
 
+        // Column-1 check fires for any recognised keyword (indexed or
+        // excluded). Unknown keywords get the dedicated "not recognised"
+        // diagnostic below instead, so they aren't doubled up.
+        if (indent > 0 && (index[kw] !== undefined || excludedKeywords.has(kw))) {
+          out.push({
+            line: i,
+            startChar: indent,
+            endChar: indent + kw.length,
+            message: `${kw}: keywords must start in column 1; indented keywords are not recognised by OPM Flow.`,
+          });
+        }
+
         // Keywords on the exclusion list opt out of all diagnostics: skip the
         // section-validity check here and leave activeKw null so subsequent
         // record lines are not arity- or terminator-checked.
@@ -219,7 +270,7 @@ export function computeDiagnostics(
 
         activeKw = index[kw] ?? null;
         activeKwLine = i;
-        activeKwIndent = text.length - text.trimStart().length;
+        activeKwIndent = indent;
 
         // Unknown-keyword check: the token looks like a keyword but is not in
         // the OPM Flow vocabulary (and not on the exclusion list). Most often a

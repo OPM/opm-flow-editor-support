@@ -89,6 +89,11 @@ export const KEYWORD_TOKEN_RE = /^[A-Z][A-Z0-9_+-]*$/;
  *  comment or `/`), as opposed to a record line. */
 export const KEYWORD_LINE_RE = /^\s*([A-Z][A-Z0-9_+-]{1,})\s*(?:--|\/\s*(?:--|$)|$)/;
 
+/** Same shape as KEYWORD_LINE_RE but accepts lowercase letters too — used by
+ *  diagnostics to detect keywords typed in non-uppercase form, which OPM Flow
+ *  itself silently fails to recognise. */
+export const KEYWORD_LINE_LOOSE_RE = /^\s*([A-Za-z][A-Za-z0-9_+-]{1,})\s*(?:--|\/\s*(?:--|$)|$)/;
+
 /** The eight section-marker keywords, in canonical OPM Flow order. */
 export const SECTION_KEYWORDS = [
   'RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS',
