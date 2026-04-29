@@ -58,6 +58,11 @@ Hovering over a **value in a data record** shows the description for that specif
 parameter column. For example, hovering over the group name in a `WELSPECS` record
 shows the `GRPNAME` parameter description, units, and default.
 
+Keywords on the diagnostics exclusion list (see `opm-flow.diagnostics.excludedKeywords`
+under [Settings](#settings)) carry an extra notice in the hover indicating that
+arity, terminator, and section checks are skipped — useful when squiggles are
+deliberately suppressed for a keyword.
+
 ### Diagnostics
 
 Squiggles in the editor catch the most common deck-shape mistakes:
@@ -240,6 +245,25 @@ The language is registered as `opm-flow`.
 - Python 3.10+ with `lxml` (only required when regenerating the keyword index)
 
 ## Release Notes
+
+### 0.6.3
+
+- New diagnostic: keyword not starting in column 1. Per the OPM Flow
+  reference manual, indented keywords are silently ignored by the simulator.
+- New diagnostic: keyword in non-uppercase form. Lines shaped like a
+  keyword declaration whose upper-cased form is a recognised keyword
+  are flagged because OPM Flow only accepts uppercase keywords.
+- Hover on a keyword that is on the diagnostics exclusion list
+  (`opm-flow.diagnostics.excludedKeywords`) now shows a notice explaining
+  that arity, terminator, and section checks are skipped for that keyword.
+- New `opm-flow.completion.stringValueStyle` setting controls how
+  STRING-typed parameter values appear in completions: `quoted` (default),
+  `unquoted`, or `both`.
+- Free-form text after a record-terminating `/` is now treated as a
+  trailing comment (the `--` prefix is no longer required).
+- Bare uppercase identifiers inside an open record block are recognised as
+  unquoted string values rather than flagged as unknown keywords (e.g. an
+  `INCLUDE` followed by an unquoted path on the next line).
 
 ### 0.6.2
 
