@@ -975,6 +975,118 @@ def parse_keyword_file(fodt_path: Path, section: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# SUMMARY mnemonics (FOPR, WOPR, GGOR, …)
+# ---------------------------------------------------------------------------
+# These aren't shipped as per-keyword .fodt files. They live as rows in the
+# tables under chapter 11 section 2 ("Data Requirements") — one row per
+# physical quantity, with the actual deck keywords listed in scope-named
+# columns (Field, Group, Well, Region, Block, …). The cell content is the
+# mnemonic; an empty cell means that scope isn't defined for that quantity.
+
+# Mnemonic tables in section 11.2 all carry "Summary Variables" or
+# "Summary Recovery Variables" in their title (Aquifer, Field/Group/Well,
+# Block/Field/Region, Recovery, plus the option-specific ones: Polymer,
+# Network Model, CO2STORE, Foam, etc.). The performance-counter table
+# ("OPM Flow Simulation Performance") has a different shape and is
+# handled separately via a header check.
+SUMMARY_TABLE_TITLE_RE = re.compile(r"Summary (Variables|Recovery Variables)$")
+
+# Column headers within those tables whose cells hold actual SUMMARY mnemonics.
+# Anything else (Type, Variable, Root, Comment) is metadata about the row.
+# WellSegment covers the Multi-Segment Wells table's S-prefix mnemonics;
+# WellLateral covers the L-prefix completion-lateral column.
+SUMMARY_SCOPE_COLUMNS = frozenset({
+    "Field", "Group", "Well", "WellConnection", "WellCompletion",
+    "WellLateral", "WellSegment",
+    "Region", "Block",
+    "AnalyticalAquifer", "AnalyticalAquiferList", "NumericalAquifer",
+})
+
+
+def _summary_size_kind(mnemonic: str) -> str:
+    """
+    Field-scope mnemonics (F-prefix: FOPR, FWPR, …) are written bare with
+    no terminating '/'. Every other scope (G/W/C/L/R/B/A/N…) takes a list
+    of names closed by '/' — modelled as ``size_kind: 'list'``.
+    """
+    return "none" if mnemonic.startswith("F") else "list"
+
+
+def parse_summary_mnemonics(section_fodt: Path) -> dict:
+    """
+    Extract SUMMARY-section mnemonics from the chapter 11 "Data Requirements"
+    section file (``parts/chapters/sections/11/2.fodt``).
+
+    Returns ``{NAME: entry}`` using the same shape as ``parse_keyword_file``:
+    each entry has ``section="SUMMARY"``, a description sourced from the
+    table's "Variable" + "Comment" columns, no parameters, and a
+    ``size_kind`` of "none" or "list" so the diagnostics engine knows
+    whether to require a terminating '/'.
+    """
+    parser = etree.XMLParser(recover=True, huge_tree=True)
+    try:
+        with open(section_fodt, "rb") as f:
+            data = f.read()
+        root = etree.fromstring(data, parser=parser)
+    except (FileNotFoundError, etree.XMLSyntaxError):
+        return {}
+    if root is None:
+        return {}
+    body = root.find(f".//{{{NS['office']}}}text")
+    if body is None:
+        return {}
+
+    out: dict = {}
+    for tbl in body.findall(f".//{{{NS['table']}}}table"):
+        rows = extract_raw_rows(tbl)
+        if len(rows) < 3:
+            continue
+        title = " ".join(t for t, _ in rows[0]).strip()
+        if not SUMMARY_TABLE_TITLE_RE.search(title):
+            continue
+
+        header = {i: t for i, (t, _) in enumerate(rows[1])}
+        # A row of column headers is the second row in every mnemonic table.
+        # The "Root" column anchors the shape; the performance-counter table
+        # and similar non-mnemonic tables don't have it.
+        if "Root" not in header.values():
+            continue
+        var_col = next((i for i, n in header.items() if n == "Variable"), None)
+        cmt_col = next((i for i, n in header.items() if n == "Comment"), None)
+        scope_cols = [(i, n) for i, n in header.items() if n in SUMMARY_SCOPE_COLUMNS]
+        if not scope_cols:
+            continue
+
+        for row in rows[2:]:
+            cells = [t for t, _ in row]
+            def _cell(i):
+                return cells[i].strip() if i is not None and i < len(cells) else ""
+            variable = _cell(var_col)
+            comment = _cell(cmt_col)
+            for col_idx, _ in scope_cols:
+                mnemonic = _cell(col_idx)
+                if not mnemonic or mnemonic in out:
+                    continue
+                if comment and variable:
+                    summary = f"{variable}. {comment}"
+                else:
+                    summary = comment or variable
+                out[mnemonic] = {
+                    "name":        mnemonic,
+                    "section":     "SUMMARY",
+                    "supported":   None,
+                    "summary":     summary,
+                    "description": summary,
+                    "parameters":  [],
+                    "examples":    [],
+                    "full_text":   summary,
+                    "source_file": str(section_fodt),
+                    "size_kind":   _summary_size_kind(mnemonic),
+                }
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Directory walker
 # ---------------------------------------------------------------------------
 
@@ -1019,6 +1131,22 @@ def build_index(manual_dir: Path) -> dict:
             else:
                 index[name] = result
             total += 1
+
+    # SUMMARY mnemonics live as table rows in chapter 11 section 2 rather
+    # than as standalone .fodt files. Merge them without overwriting any
+    # existing per-keyword entries.
+    summary_fodt = manual_dir / "parts" / "chapters" / "sections" / "11" / "2.fodt"
+    if summary_fodt.exists():
+        mnemonics = parse_summary_mnemonics(summary_fodt)
+        added = 0
+        for name, entry in mnemonics.items():
+            if name in index:
+                continue
+            index[name] = entry
+            added += 1
+        print(f"  SUMMARY    (11.2):  {added} mnemonics added")
+    else:
+        print(f"  INFO: SUMMARY mnemonics file not found, skipping: {summary_fodt}")
 
     print(f"\nIndexed {total} keywords ({skipped} skipped)")
     return index

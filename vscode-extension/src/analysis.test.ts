@@ -708,3 +708,46 @@ describe('computeDiagnostics — excluded keywords', () => {
     expect(diags.some(d => d.message.includes('not valid in SCHEDULE'))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Issue #15 — SUMMARY mnemonics (FOPR, WOPR, GGOR, …) must be recognised
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — SUMMARY mnemonics (issue #15)', () => {
+  // Field-scope mnemonics are bare (no trailing '/'); group/well/region
+  // mnemonics take a name list closed by '/'. The build script generates
+  // these entries with the right size_kind so the diagnostics engine
+  // accepts both shapes without complaint.
+  const summaryIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    FOPR: { name: 'FOPR', sections: ['SUMMARY'], size_kind: 'none' },
+    FWPR: { name: 'FWPR', sections: ['SUMMARY'], size_kind: 'none' },
+    WOPR: { name: 'WOPR', sections: ['SUMMARY'], size_kind: 'list' },
+    GGOR: { name: 'GGOR', sections: ['SUMMARY'], size_kind: 'list' },
+    WOPT: { name: 'WOPT', sections: ['SUMMARY'], size_kind: 'list' },
+  };
+
+  it('accepts bare field-scope mnemonics', () => {
+    const lines = ['SUMMARY', 'FOPR', 'FWPR'];
+    expect(computeDiagnostics(lines, summaryIndex)).toEqual([]);
+  });
+
+  it('accepts well/group mnemonics closed by a standalone /', () => {
+    const lines = ['SUMMARY', 'WOPR', '/', 'GGOR', '/', 'WOPT', '/'];
+    expect(computeDiagnostics(lines, summaryIndex)).toEqual([]);
+  });
+
+  it('accepts well mnemonics followed by a list of well names', () => {
+    const lines = ['SUMMARY', 'WOPR', "'W1' 'W2' /", '/'];
+    expect(computeDiagnostics(lines, summaryIndex)).toEqual([]);
+  });
+
+  it('does not flag SUMMARY mnemonics as unknown keywords', () => {
+    // Pre-fix, FWPR / WOPR / GGOR were flagged as "not a recognised
+    // OPM Flow keyword" because they're table rows in the manual rather
+    // than per-keyword files.
+    const lines = ['SUMMARY', 'FWPR', 'WOPR', '/'];
+    const diags = computeDiagnostics(lines, summaryIndex);
+    expect(diags.filter(d => /not a recognised/.test(d.message))).toEqual([]);
+  });
+});

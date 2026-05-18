@@ -28,6 +28,7 @@ from build_keyword_index import (
     is_unit_row,
     parse_param_table,
     parse_keyword_file,
+    parse_summary_mnemonics,
     params_to_markdown,
     iter_paragraphs,
     load_opm_common_index,
@@ -37,6 +38,7 @@ from build_keyword_index import (
     attach_string_options,
     _opm_item_for_param,
     _classify_size,
+    _summary_size_kind,
     NS,
     SECTION_MAP,
 )
@@ -1019,6 +1021,157 @@ class TestExtractStringOptions:
     def test_empty_description_returns_empty(self):
         assert extract_string_options("", "TYPE") == []
         assert extract_string_options(None, "TYPE") == []  # type: ignore
+
+
+# ---------------------------------------------------------------------------
+# parse_summary_mnemonics — extracts FOPR / WOPR / GGOR / … from the
+# chapter 11 section 2 mnemonic tables (issue #15)
+# ---------------------------------------------------------------------------
+
+
+class TestParseSummaryMnemonics:
+    def _write_section_fodt(self, tmp_path: Path, body_content: str) -> Path:
+        section_dir = tmp_path / "parts" / "chapters" / "sections" / "11"
+        section_dir.mkdir(parents=True)
+        fodt = section_dir / "2.fodt"
+        fodt.write_bytes(_make_fodt(body_content))
+        return fodt
+
+    def _fgwcl_table(self, *data_rows: str) -> str:
+        title = _row("Field, Group, Well, Well Connection, and Completion Summary Variables")
+        header = _row("Type", "Variable", "Root", "Field", "Group", "Well",
+                      "WellConnection", "WellCompletion", "Comment")
+        return _table(title, header, *data_rows)
+
+    def test_extracts_field_group_well_mnemonics(self, tmp_path):
+        body = self._fgwcl_table(
+            _row("Flow", "Oil Production Rate", "OPR",
+                 "FOPR", "GOPR", "WOPR", "", "", ""),
+        )
+        fodt = self._write_section_fodt(tmp_path, body)
+        result = parse_summary_mnemonics(fodt)
+        assert "FOPR" in result and "GOPR" in result and "WOPR" in result
+
+    def test_field_scope_gets_size_kind_none(self, tmp_path):
+        # F-prefix mnemonics are written bare (`FOPR` on a line by itself,
+        # no terminating `/`) — that's `size_kind: "none"`.
+        body = self._fgwcl_table(
+            _row("Flow", "Water Production Rate", "WPR",
+                 "FWPR", "", "", "", "", ""),
+        )
+        fodt = self._write_section_fodt(tmp_path, body)
+        assert parse_summary_mnemonics(fodt)["FWPR"]["size_kind"] == "none"
+
+    def test_well_and_group_scope_get_size_kind_list(self, tmp_path):
+        body = self._fgwcl_table(
+            _row("Flow", "Gas-Oil Ratio", "GOR",
+                 "", "GGOR", "WGOR", "", "", ""),
+        )
+        fodt = self._write_section_fodt(tmp_path, body)
+        out = parse_summary_mnemonics(fodt)
+        assert out["GGOR"]["size_kind"] == "list"
+        assert out["WGOR"]["size_kind"] == "list"
+
+    def test_skips_empty_scope_cells(self, tmp_path):
+        # Only WOPT exists for this row; the empty Field/Group cells must
+        # not be emitted as keywords.
+        body = self._fgwcl_table(
+            _row("Flow", "Oil Production Total", "OPT",
+                 "", "", "WOPT", "", "", ""),
+        )
+        fodt = self._write_section_fodt(tmp_path, body)
+        out = parse_summary_mnemonics(fodt)
+        assert list(out.keys()) == ["WOPT"]
+
+    def test_attaches_summary_section(self, tmp_path):
+        body = self._fgwcl_table(
+            _row("Flow", "Oil Production Rate", "OPR",
+                 "FOPR", "", "", "", "", ""),
+        )
+        fodt = self._write_section_fodt(tmp_path, body)
+        assert parse_summary_mnemonics(fodt)["FOPR"]["section"] == "SUMMARY"
+
+    def test_summary_text_uses_variable_and_comment(self, tmp_path):
+        body = self._fgwcl_table(
+            _row("Flow", "Oil Production Rate", "OPR",
+                 "FOPR", "", "", "", "", "Cumulative when reported."),
+        )
+        fodt = self._write_section_fodt(tmp_path, body)
+        summary = parse_summary_mnemonics(fodt)["FOPR"]["summary"]
+        assert "Oil Production Rate" in summary
+        assert "Cumulative when reported." in summary
+
+    def test_picks_up_option_specific_tables(self, tmp_path):
+        # Option-specific tables (Polymer, Network Model, CO2STORE, …) share
+        # the F/G/W/C/L shape and contain real mnemonics users write into
+        # decks — they must be parsed too. Issue #15 surfaced GPR as a
+        # specific miss from the Network Model table.
+        title = _row("Polymer Model Summary Variables")
+        header = _row("Type", "Variable", "Root", "Field", "Group", "Well",
+                      "WellConnection", "Region", "Block", "Comment")
+        data = _row("Flow", "Polymer Concentration", "PC",
+                    "FPC", "GPC", "WPC", "", "", "", "")
+        body = _table(title, header, data)
+        fodt = self._write_section_fodt(tmp_path, body)
+        out = parse_summary_mnemonics(fodt)
+        for kw in ("FPC", "GPC", "WPC"):
+            assert kw in out
+
+    def test_picks_up_network_model_gpr(self, tmp_path):
+        # Regression: GPR (Group/Node pressure in a production network)
+        # lives in the Network Model table — was previously skipped because
+        # only the four core titles were allow-listed.
+        title = _row("Network Model Summary Variables")
+        header = _row("Type", "Variable", "Root", "Field", "Group", "Well",
+                      "WellConnection", "Region", "Block")
+        data = _row("Pressure", "Group/Node pressure in a production network.",
+                    "", "", "GPR", "", "", "", "")
+        body = _table(title, header, data)
+        fodt = self._write_section_fodt(tmp_path, body)
+        out = parse_summary_mnemonics(fodt)
+        assert "GPR" in out
+        assert out["GPR"]["size_kind"] == "list"
+
+    def test_ignores_tables_without_root_column(self, tmp_path):
+        # The performance-counter table has a "Variable Description |
+        # Variable | Comment" shape with no "Root" column; it must not
+        # be misinterpreted as a mnemonic table.
+        title = _row("OPM Flow Simulation Performance Summary Variables")
+        header = _row("Variable Description", "Variable", "Comment")
+        data = _row("Wall clock time", "TCPU", "")
+        body = _table(title, header, data)
+        fodt = self._write_section_fodt(tmp_path, body)
+        assert parse_summary_mnemonics(fodt) == {}
+
+    def test_handles_aquifer_and_recovery_table_titles(self, tmp_path):
+        aq_title = _row("Aquifer Summary Variables")
+        aq_header = _row("Variable", "Root", "Field", "AnalyticalAquifer",
+                         "AnalyticalAquiferList", "NumericalAquifer", "Comment")
+        aq_data = _row("Aquifer Influx Rate", "QR", "FAQR", "AAQR", "ALQR", "ANQR", "")
+
+        rec_title = _row("Field and Region Summary Recovery Variables")
+        rec_header = _row("Type", "Variable", "Root", "Field", "Region", "Comment")
+        rec_data = _row("Recovery", "Oil Recovery", "OE", "FOE", "ROE", "")
+
+        body = _table(aq_title, aq_header, aq_data) + _table(rec_title, rec_header, rec_data)
+        fodt = self._write_section_fodt(tmp_path, body)
+        out = parse_summary_mnemonics(fodt)
+        for kw in ("FAQR", "AAQR", "ALQR", "ANQR", "FOE", "ROE"):
+            assert kw in out
+        assert out["FAQR"]["size_kind"] == "none"
+        assert out["AAQR"]["size_kind"] == "list"
+        assert out["FOE"]["size_kind"] == "none"
+        assert out["ROE"]["size_kind"] == "list"
+
+
+class TestSummarySizeKind:
+    def test_field_scope_none(self):
+        assert _summary_size_kind("FOPR") == "none"
+        assert _summary_size_kind("FWPR") == "none"
+
+    def test_other_scopes_list(self):
+        for kw in ("WOPR", "GGOR", "ROE", "BPR", "AAQR"):
+            assert _summary_size_kind(kw) == "list"
 
 
 class TestAttachStringOptions:
