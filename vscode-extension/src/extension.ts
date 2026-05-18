@@ -19,6 +19,7 @@ import {
   tokenColumnCount,
 } from './formatting';
 import { computeDiagnostics } from './analysis';
+import { findFileReferences } from './links';
 import { parsePathsAliases, resolvePathAlias } from './paths';
 import { DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
 
@@ -717,50 +718,24 @@ class OpmFlowFoldingRangeProvider implements vscode.FoldingRangeProvider {
 }
 
 // ---------------------------------------------------------------------------
-// INCLUDE file link provider
+// File-reference link provider — INCLUDE / IMPORT / RESTART / GDFILE
 // ---------------------------------------------------------------------------
 
-// Matches a bare INCLUDE keyword line (no path), e.g. "INCLUDE", "INCLUDE -- comment", "INCLUDE / -- comment"
-const INCLUDE_KW_RE = /^\s*INCLUDE\s*(?:--|\/\s*(?:--|$)|$)/;
-const INCLUDE_PATH_RE = /^\s*'([^']+)'/;
-// Maximum number of lines to scan after INCLUDE for the quoted path
-const INCLUDE_MAX_LOOKAHEAD = 4;
-
-class IncludeLinkProvider implements vscode.DocumentLinkProvider {
+class FileReferenceLinkProvider implements vscode.DocumentLinkProvider {
   provideDocumentLinks(document: vscode.TextDocument): vscode.DocumentLink[] {
-    const links: vscode.DocumentLink[] = [];
-    if (!document.uri.fsPath) return links;
+    if (!document.uri.fsPath) return [];
     const docDir = path.dirname(document.uri.fsPath);
 
     const lines: string[] = [];
-    for (let k = 0; k < document.lineCount; k++) lines.push(document.lineAt(k).text);
+    for (let i = 0; i < document.lineCount; i++) lines.push(document.lineAt(i).text);
     const aliases = parsePathsAliases(lines);
 
-    for (let i = 0; i < document.lineCount; i++) {
-      const line = document.lineAt(i).text;
-      if (!INCLUDE_KW_RE.test(line)) continue;
-
-      // The path is on the next non-blank, non-comment line after INCLUDE
-      for (let j = i + 1; j < Math.min(i + INCLUDE_MAX_LOOKAHEAD, document.lineCount); j++) {
-        const nextLine = document.lineAt(j).text;
-        if (/^\s*(--|$)/.test(nextLine)) continue;
-
-        const m = INCLUDE_PATH_RE.exec(nextLine);
-        if (!m) break;
-
-        const quotedPath = m[1];
-        const startChar = nextLine.indexOf("'") + 1;
-        const endChar = startChar + quotedPath.length;
-        const range = new vscode.Range(j, startChar, j, endChar);
-        const resolved = resolvePathAlias(quotedPath, aliases);
-        const absPath = path.resolve(docDir, resolved);
-        const uri = vscode.Uri.file(absPath);
-        links.push(new vscode.DocumentLink(range, uri));
-        break;
-      }
-    }
-
-    return links;
+    return findFileReferences(lines).map(ref => {
+      const range = new vscode.Range(ref.line, ref.startChar, ref.line, ref.endChar);
+      const resolved = resolvePathAlias(ref.rawPath, aliases);
+      const absPath = path.resolve(docDir, resolved);
+      return new vscode.DocumentLink(range, vscode.Uri.file(absPath));
+    });
   }
 }
 
@@ -1124,10 +1099,10 @@ export function activate(context: vscode.ExtensionContext): void {
     await editor.edit(b => { for (const e of edits) b.replace(e.range, e.newText); });
   });
 
-  // --- INCLUDE file link provider ---
-  const includeLinkProvider = vscode.languages.registerDocumentLinkProvider(
+  // --- File-reference link provider (INCLUDE / IMPORT / RESTART / GDFILE) ---
+  const fileLinkProvider = vscode.languages.registerDocumentLinkProvider(
     'opm-flow',
-    new IncludeLinkProvider()
+    new FileReferenceLinkProvider()
   );
 
   // --- Folding range provider ---
@@ -1157,7 +1132,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  context.subscriptions.push(completionProvider, valueCompletionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, includeLinkProvider, foldingProvider);
+  context.subscriptions.push(completionProvider, valueCompletionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, fileLinkProvider, foldingProvider);
 }
 
 export function deactivate(): void {}
