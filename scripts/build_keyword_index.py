@@ -1072,6 +1072,11 @@ def parse_summary_mnemonics(section_fodt: Path) -> dict:
                 return cells[i].strip() if i is not None and i < len(cells) else ""
             variable = _cell(var_col)
             comment = _cell(cmt_col)
+            # Tracer mnemonics (FTPR, WTPC, GTIR, …) are templates: the user
+            # appends a tracer name from their TRACERS keyword, so the actual
+            # deck keyword is e.g. FTPRSEA. The Variable column starts with
+            # "Tracer" for every row whose mnemonics need this treatment.
+            is_templated = variable.lower().startswith("tracer")
             for col_idx, _ in scope_cols:
                 mnemonic = _cell(col_idx)
                 if not mnemonic or mnemonic in out:
@@ -1095,6 +1100,8 @@ def parse_summary_mnemonics(section_fodt: Path) -> dict:
                 }
                 if size_count is not None:
                     entry["size_count"] = size_count
+                if is_templated:
+                    entry["templated"] = True
                 out[mnemonic] = entry
     return out
 
@@ -1227,6 +1234,8 @@ def write_compact_json(index: dict, output_path: Path):
         size_count = primary.get("size_count")
         if size_count is not None:
             out_entry["size_count"] = size_count
+        if primary.get("templated"):
+            out_entry["templated"] = True
         compact[name] = out_entry
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(compact, f, separators=(",", ":"), ensure_ascii=False)
