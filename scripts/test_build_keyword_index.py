@@ -38,7 +38,7 @@ from build_keyword_index import (
     attach_string_options,
     _opm_item_for_param,
     _classify_size,
-    _summary_size_kind,
+    _summary_size_shape,
     NS,
     SECTION_MAP,
 )
@@ -1060,17 +1060,23 @@ class TestParseSummaryMnemonics:
                  "FWPR", "", "", "", "", ""),
         )
         fodt = self._write_section_fodt(tmp_path, body)
-        assert parse_summary_mnemonics(fodt)["FWPR"]["size_kind"] == "none"
+        entry = parse_summary_mnemonics(fodt)["FWPR"]
+        assert entry["size_kind"] == "none"
+        assert "size_count" not in entry
 
-    def test_well_and_group_scope_get_size_kind_list(self, tmp_path):
+    def test_well_and_group_scope_get_size_kind_fixed_one(self, tmp_path):
+        # Group/well/region/etc. mnemonics take a single record (a list of
+        # names or just '/'); modelling them as 'list' would wrongly demand
+        # a closing standalone '/'. They're 'fixed' with size_count=1.
         body = self._fgwcl_table(
             _row("Flow", "Gas-Oil Ratio", "GOR",
                  "", "GGOR", "WGOR", "", "", ""),
         )
         fodt = self._write_section_fodt(tmp_path, body)
         out = parse_summary_mnemonics(fodt)
-        assert out["GGOR"]["size_kind"] == "list"
-        assert out["WGOR"]["size_kind"] == "list"
+        for kw in ("GGOR", "WGOR"):
+            assert out[kw]["size_kind"] == "fixed"
+            assert out[kw]["size_count"] == 1
 
     def test_skips_empty_scope_cells(self, tmp_path):
         # Only WOPT exists for this row; the empty Field/Group cells must
@@ -1130,7 +1136,8 @@ class TestParseSummaryMnemonics:
         fodt = self._write_section_fodt(tmp_path, body)
         out = parse_summary_mnemonics(fodt)
         assert "GPR" in out
-        assert out["GPR"]["size_kind"] == "list"
+        assert out["GPR"]["size_kind"] == "fixed"
+        assert out["GPR"]["size_count"] == 1
 
     def test_ignores_tables_without_root_column(self, tmp_path):
         # The performance-counter table has a "Variable Description |
@@ -1159,19 +1166,19 @@ class TestParseSummaryMnemonics:
         for kw in ("FAQR", "AAQR", "ALQR", "ANQR", "FOE", "ROE"):
             assert kw in out
         assert out["FAQR"]["size_kind"] == "none"
-        assert out["AAQR"]["size_kind"] == "list"
+        assert out["AAQR"]["size_kind"] == "fixed" and out["AAQR"]["size_count"] == 1
         assert out["FOE"]["size_kind"] == "none"
-        assert out["ROE"]["size_kind"] == "list"
+        assert out["ROE"]["size_kind"] == "fixed" and out["ROE"]["size_count"] == 1
 
 
-class TestSummarySizeKind:
+class TestSummarySizeShape:
     def test_field_scope_none(self):
-        assert _summary_size_kind("FOPR") == "none"
-        assert _summary_size_kind("FWPR") == "none"
+        assert _summary_size_shape("FOPR") == ("none", None)
+        assert _summary_size_shape("FWPR") == ("none", None)
 
-    def test_other_scopes_list(self):
-        for kw in ("WOPR", "GGOR", "ROE", "BPR", "AAQR"):
-            assert _summary_size_kind(kw) == "list"
+    def test_other_scopes_fixed_one(self):
+        for kw in ("WOPR", "WWIR", "GGOR", "ROE", "BPR", "AAQR"):
+            assert _summary_size_shape(kw) == ("fixed", 1)
 
 
 class TestAttachStringOptions:

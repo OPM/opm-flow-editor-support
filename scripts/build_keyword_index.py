@@ -1003,13 +1003,22 @@ SUMMARY_SCOPE_COLUMNS = frozenset({
 })
 
 
-def _summary_size_kind(mnemonic: str) -> str:
+def _summary_size_shape(mnemonic: str) -> tuple[str, Optional[int]]:
     """
+    Return ``(size_kind, size_count)`` for a SUMMARY mnemonic.
+
     Field-scope mnemonics (F-prefix: FOPR, FWPR, …) are written bare with
-    no terminating '/'. Every other scope (G/W/C/L/R/B/A/N…) takes a list
-    of names closed by '/' — modelled as ``size_kind: 'list'``.
+    no terminating '/' — ``size_kind: 'none'``.
+
+    Every other scope (G/W/C/L/R/B/A/N/S…) takes a *single* record that
+    is either a list of names (``WOPR \\n 'W1' 'W2' /``) or just a bare
+    '/' meaning "all" (``WOPR \\n /``). That's ``size_kind: 'fixed'``
+    with ``size_count: 1`` — modelling it as 'list' wrongly demands a
+    second standalone '/' to close the block.
     """
-    return "none" if mnemonic.startswith("F") else "list"
+    if mnemonic.startswith("F"):
+        return "none", None
+    return "fixed", 1
 
 
 def parse_summary_mnemonics(section_fodt: Path) -> dict:
@@ -1071,7 +1080,8 @@ def parse_summary_mnemonics(section_fodt: Path) -> dict:
                     summary = f"{variable}. {comment}"
                 else:
                     summary = comment or variable
-                out[mnemonic] = {
+                size_kind, size_count = _summary_size_shape(mnemonic)
+                entry = {
                     "name":        mnemonic,
                     "section":     "SUMMARY",
                     "supported":   None,
@@ -1081,8 +1091,11 @@ def parse_summary_mnemonics(section_fodt: Path) -> dict:
                     "examples":    [],
                     "full_text":   summary,
                     "source_file": str(section_fodt),
-                    "size_kind":   _summary_size_kind(mnemonic),
+                    "size_kind":   size_kind,
                 }
+                if size_count is not None:
+                    entry["size_count"] = size_count
+                out[mnemonic] = entry
     return out
 
 
