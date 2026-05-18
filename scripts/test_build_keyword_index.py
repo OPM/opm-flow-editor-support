@@ -1139,6 +1139,26 @@ class TestParseSummaryMnemonics:
         assert out["GPR"]["size_kind"] == "fixed"
         assert out["GPR"]["size_count"] == 1
 
+    def test_tags_tracer_rows_as_templated(self, tmp_path):
+        # Tracer mnemonics (FTPR, WTPC, …) are templates — the user appends
+        # their tracer name from TRACERS (FTPRSEA, WTPCHTO, …). The build
+        # script tags those entries with templated=True so the diagnostics
+        # engine can accept ``<template><suffix>`` tokens.
+        title = _row("API and Tracer Tracking Summary Variables")
+        header = _row("Type", "Variable", "Root", "Field", "Group", "Well",
+                      "WellConnection", "Region", "Block")
+        tracer_row = _row("Flow", "Tracer Production Rate", "TPR",
+                          "FTPR", "GTPR", "WTPR", "CTPR", "", "")
+        nontracer_row = _row("Flow", "Oil API", "API",
+                             "FAPI", "GAPI", "WAPI", "CAPI", "RAPI", "BAPI")
+        body = _table(title, header, tracer_row, nontracer_row)
+        fodt = self._write_section_fodt(tmp_path, body)
+        out = parse_summary_mnemonics(fodt)
+        for kw in ("FTPR", "GTPR", "WTPR", "CTPR"):
+            assert out[kw].get("templated") is True
+        for kw in ("FAPI", "GAPI", "WAPI"):
+            assert "templated" not in out[kw]
+
     def test_ignores_tables_without_root_column(self, tmp_path):
         # The performance-counter table has a "Variable Description |
         # Variable | Comment" shape with no "Root" column; it must not

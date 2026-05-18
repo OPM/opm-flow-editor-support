@@ -46,6 +46,14 @@ export interface AnalysisEntry {
   size_kind?: SizeKind;
   /** For `size_kind: 'fixed'`, the number of records the keyword expects. */
   size_count?: number;
+  /**
+   * True when the entry is a SUMMARY-section *template*: users append a
+   * tracer/component name to form the actual deck keyword (e.g. ``FTPR``
+   * is templated; the deck writes ``FTPRSEA`` for the SEA tracer). The
+   * diagnostics engine treats any ``<template><suffix>`` token whose
+   * suffix is ``[A-Z0-9]+`` as recognised, with this entry's shape.
+   */
+  templated?: boolean;
 }
 
 export type AnalysisIndex = Record<string, AnalysisEntry>;
@@ -89,6 +97,43 @@ function expectsMoreRecords(
     return recordCount < expected;
   }
   return false;
+}
+
+/** Tracer/component name suffix following a templated mnemonic prefix.
+ *  Restricted to uppercase letters and digits so we don't accidentally
+ *  match unrelated tokens. */
+const TEMPLATE_SUFFIX_RE = /^[A-Z0-9]+$/;
+
+/** Resolve `kw` to an index entry, falling back to a templated-prefix
+ *  match when no exact entry exists. Returns the *template's* entry —
+ *  callers use it for shape (size_kind, etc.); the displayed keyword
+ *  name remains the full token from the deck.
+ *
+ *  Picks the *shortest* matching template. We can't disambiguate
+ *  e.g. ``FTPRSEA`` between template ``FTPR`` + tracer ``SEA`` and
+ *  ``FTPRS`` + tracer ``EA`` without knowing the user's TRACERS list,
+ *  and the base template (``FTPR``) is far more common in real decks
+ *  than the qualified Free/Solution variants. All variants share the
+ *  same size_kind anyway, so this only affects hover descriptions. */
+function lookupEntry(
+  index: AnalysisIndex,
+  kw: string,
+): AnalysisEntry | undefined {
+  const direct = index[kw];
+  if (direct) return direct;
+  let best: AnalysisEntry | undefined;
+  let bestLen = Infinity;
+  for (const name in index) {
+    if (name.length >= bestLen) continue;
+    if (name.length >= kw.length) continue;
+    if (!kw.startsWith(name)) continue;
+    const entry = index[name];
+    if (!entry?.templated) continue;
+    if (!TEMPLATE_SUFFIX_RE.test(kw.slice(name.length))) continue;
+    best = entry;
+    bestLen = name.length;
+  }
+  return best;
 }
 
 /** True when, after the last value token, the line carries a '/' terminator
@@ -201,7 +246,7 @@ export function computeDiagnostics(
       const upper = tok.toUpperCase();
       const isRecognised =
         SECTION_KEYWORD_SET.has(upper)
-        || index[upper] !== undefined
+        || lookupEntry(index, upper) !== undefined
         || excludedKeywords.has(upper);
       if (tok !== upper && isRecognised) {
         const indent = text.length - text.trimStart().length;
@@ -240,9 +285,10 @@ export function computeDiagnostics(
       // keyword. If the active keyword's block is still expecting records
       // and the token is not itself a known keyword (or excluded), fall
       // through to record parsing instead of starting a new keyword.
+      const entry = lookupEntry(index, kw);
       const treatAsRecord =
         activeKw !== null
-        && !index[kw]
+        && !entry
         && !excludedKeywords.has(kw)
         && expectsMoreRecords(activeKw, recordCount, listTerminatorSeen, arrayTerminatorSeen);
 
@@ -252,7 +298,7 @@ export function computeDiagnostics(
         // Column-1 check fires for any recognised keyword (indexed or
         // excluded). Unknown keywords get the dedicated "not recognised"
         // diagnostic below instead, so they aren't doubled up.
-        if (indent > 0 && (index[kw] !== undefined || excludedKeywords.has(kw))) {
+        if (indent > 0 && (entry !== undefined || excludedKeywords.has(kw))) {
           out.push({
             line: i,
             startChar: indent,
@@ -268,7 +314,7 @@ export function computeDiagnostics(
           continue;
         }
 
-        activeKw = index[kw] ?? null;
+        activeKw = entry ?? null;
         activeKwLine = i;
         activeKwIndent = indent;
 

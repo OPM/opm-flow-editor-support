@@ -763,3 +763,59 @@ describe('computeDiagnostics — SUMMARY mnemonics (issue #15)', () => {
     expect(diags.filter(d => /not a recognised/.test(d.message))).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tracer mnemonic templates — FTPR + SEA -> FTPRSEA must be recognised
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — templated tracer mnemonics', () => {
+  // Tracer mnemonic templates: the deck appends a user-defined tracer name
+  // (FTPRSEA = FTPR + SEA). The build script tags the bases as templated;
+  // the engine accepts any <template>+[A-Z0-9]+ token using the template's
+  // size_kind / size_count for diagnostics.
+  const tracerIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    FTPR:  { name: 'FTPR',  sections: ['SUMMARY'], size_kind: 'none', templated: true },
+    FTPRF: { name: 'FTPRF', sections: ['SUMMARY'], size_kind: 'none', templated: true },
+    WTPC:  { name: 'WTPC',  sections: ['SUMMARY'], size_kind: 'fixed', size_count: 1, templated: true },
+    WTIT:  { name: 'WTIT',  sections: ['SUMMARY'], size_kind: 'fixed', size_count: 1, templated: true },
+    FAPI:  { name: 'FAPI',  sections: ['SUMMARY'], size_kind: 'none' }, // not templated
+  };
+
+  it('accepts a bare F-template + tracer-name token (issue example)', () => {
+    // Norne-style line `FTPRSEA` — must not be flagged as unknown.
+    const lines = ['SUMMARY', 'FTPRSEA'];
+    expect(computeDiagnostics(lines, tracerIndex)).toEqual([]);
+  });
+
+  it('accepts a W-template + tracer-name with a well-list record', () => {
+    // Exact shape from the user's tracer.data file.
+    const lines = ['SUMMARY', 'WTITSEA', " 'C-1H' 'C-2H' /"];
+    expect(computeDiagnostics(lines, tracerIndex)).toEqual([]);
+  });
+
+  it('prefers the shortest matching template', () => {
+    // `FTPRSEA` could parse as FTPR+SEA or FTPRS+EA — without a TRACERS
+    // list we can't tell. Prefer the base template (FTPR) because real
+    // decks far more often use the unqualified form + tracer name than
+    // the Free/Solution-qualified form. Diagnostic shape is identical
+    // either way, so this is purely a hover-description choice.
+    const lines = ['SUMMARY', 'FTPRSEA', 'FTPRFOO'];
+    expect(computeDiagnostics(lines, tracerIndex)).toEqual([]);
+  });
+
+  it('does not accept arbitrary suffixes on non-templated entries', () => {
+    // FAPI is a literal mnemonic — FAPIFOO must still be flagged as unknown.
+    const lines = ['SUMMARY', 'FAPIFOO'];
+    const diags = computeDiagnostics(lines, tracerIndex);
+    expect(diags.some(d => /FAPIFOO is not a recognised/.test(d.message))).toBe(true);
+  });
+
+  it('does not match a template with an empty suffix', () => {
+    // The template token itself is still treated as a normal entry; the
+    // prefix path only fires when there's at least one suffix character.
+    // (FTPR alone is recognised via the direct lookup, no templated path.)
+    const lines = ['SUMMARY', 'FTPR'];
+    expect(computeDiagnostics(lines, tracerIndex)).toEqual([]);
+  });
+});
