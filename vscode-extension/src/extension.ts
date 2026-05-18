@@ -57,6 +57,13 @@ interface KeywordEntry {
   size_kind?: 'none' | 'fixed' | 'list' | 'array';
   /** For `size_kind: 'fixed'`, the number of records the keyword expects. */
   size_count?: number;
+  /**
+   * True for SUMMARY-section *templates*: the user appends a tracer or
+   * component name to form the actual deck keyword (FTPR -> FTPRSEA).
+   * Docs/hover lookups fall back to the shortest matching template
+   * when the literal token isn't in the index.
+   */
+  templated?: boolean;
 }
 
 type KeywordIndex = Record<string, KeywordEntry>;
@@ -162,6 +169,33 @@ function findCurrentSection(document: vscode.TextDocument, position: vscode.Posi
 function wordAtPosition(document: vscode.TextDocument, position: vscode.Position): string {
   const range = document.getWordRangeAtPosition(position, /[A-Z][A-Z0-9_-]*/);
   return range ? document.getText(range) : '';
+}
+
+const TEMPLATE_SUFFIX_RE = /^[A-Z0-9]+$/;
+
+/**
+ * Resolve a keyword token to its index entry, falling back to the
+ * shortest templated entry whose name is a strict prefix (with a
+ * ``[A-Z0-9]+`` suffix). Mirrors the diagnostics engine's lookupEntry
+ * so docs/hover on a templated SUMMARY mnemonic like ``FTPRSEA`` find
+ * the base ``FTPR`` template entry.
+ */
+function resolveKeyword(index: KeywordIndex, kw: string): KeywordEntry | undefined {
+  const direct = index[kw];
+  if (direct) return direct;
+  let best: KeywordEntry | undefined;
+  let bestLen = Infinity;
+  for (const name in index) {
+    if (name.length >= bestLen) continue;
+    if (name.length >= kw.length) continue;
+    if (!kw.startsWith(name)) continue;
+    const entry = index[name];
+    if (!entry?.templated) continue;
+    if (!TEMPLATE_SUFFIX_RE.test(kw.slice(name.length))) continue;
+    best = entry;
+    bestLen = name.length;
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------
@@ -782,15 +816,16 @@ export function activate(context: vscode.ExtensionContext): void {
     const line = editor.document.lineAt(pos).text;
 
     const word = wordAtPosition(editor.document, pos);
-    if (word && index[word]) {
-      docsProvider.update(index[word]);
+    const wordEntry = word ? resolveKeyword(index, word) : undefined;
+    if (wordEntry) {
+      docsProvider.update(wordEntry);
       return;
     }
 
     const col = columnAtCursor(line, pos.character);
     if (col >= 1) {
       const kwName = findActiveKeyword(editor.document, pos);
-      const entry = kwName ? index[kwName] : undefined;
+      const entry = kwName ? resolveKeyword(index, kwName) : undefined;
       if (entry) {
         const record = findActiveRecord(editor.document, entry, pos);
         const param = findParam(entry, record, p => p.index === col);
@@ -930,10 +965,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
       const word = wordAtPosition(document, position);
       const excluded = getExcludedKeywords(document.uri);
-      if (word && index[word]) {
+      const wordEntry = word ? resolveKeyword(index, word) : undefined;
+      if (word && wordEntry) {
         const currentSection = findCurrentSection(document, position);
         return new vscode.Hover(
-          buildKeywordHover(index[word], currentSection, excluded.has(word)),
+          buildKeywordHover(wordEntry, currentSection, excluded.has(word)),
         );
       }
 
