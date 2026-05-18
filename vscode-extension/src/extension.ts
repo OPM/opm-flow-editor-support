@@ -19,6 +19,7 @@ import {
   tokenColumnCount,
 } from './formatting';
 import { computeDiagnostics } from './analysis';
+import { parsePathsAliases, resolvePathAlias } from './paths';
 import { DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
 
 interface Parameter {
@@ -731,6 +732,10 @@ class IncludeLinkProvider implements vscode.DocumentLinkProvider {
     if (!document.uri.fsPath) return links;
     const docDir = path.dirname(document.uri.fsPath);
 
+    const lines: string[] = [];
+    for (let k = 0; k < document.lineCount; k++) lines.push(document.lineAt(k).text);
+    const aliases = parsePathsAliases(lines);
+
     for (let i = 0; i < document.lineCount; i++) {
       const line = document.lineAt(i).text;
       if (!INCLUDE_KW_RE.test(line)) continue;
@@ -747,7 +752,8 @@ class IncludeLinkProvider implements vscode.DocumentLinkProvider {
         const startChar = nextLine.indexOf("'") + 1;
         const endChar = startChar + quotedPath.length;
         const range = new vscode.Range(j, startChar, j, endChar);
-        const absPath = path.resolve(docDir, quotedPath);
+        const resolved = resolvePathAlias(quotedPath, aliases);
+        const absPath = path.resolve(docDir, resolved);
         const uri = vscode.Uri.file(absPath);
         links.push(new vscode.DocumentLink(range, uri));
         break;
