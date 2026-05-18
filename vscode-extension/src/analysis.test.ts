@@ -714,17 +714,21 @@ describe('computeDiagnostics — excluded keywords', () => {
 // ---------------------------------------------------------------------------
 
 describe('computeDiagnostics — SUMMARY mnemonics (issue #15)', () => {
-  // Field-scope mnemonics are bare (no trailing '/'); group/well/region
-  // mnemonics take a name list closed by '/'. The build script generates
-  // these entries with the right size_kind so the diagnostics engine
-  // accepts both shapes without complaint.
+  // Field-scope mnemonics are bare (no trailing '/'); every other scope
+  // takes a single record (a name list, or just '/' meaning "all"). The
+  // build script generates these entries with size_kind='none' /
+  // size_kind='fixed' + size_count=1 respectively, so the diagnostics
+  // engine accepts all valid shapes without complaint — and crucially
+  // does NOT demand a second standalone '/' to close the block, since
+  // these mnemonics aren't list-shaped.
   const summaryIndex: Record<string, AnalysisEntry> = {
     ...index,
     FOPR: { name: 'FOPR', sections: ['SUMMARY'], size_kind: 'none' },
     FWPR: { name: 'FWPR', sections: ['SUMMARY'], size_kind: 'none' },
-    WOPR: { name: 'WOPR', sections: ['SUMMARY'], size_kind: 'list' },
-    GGOR: { name: 'GGOR', sections: ['SUMMARY'], size_kind: 'list' },
-    WOPT: { name: 'WOPT', sections: ['SUMMARY'], size_kind: 'list' },
+    WOPR: { name: 'WOPR', sections: ['SUMMARY'], size_kind: 'fixed', size_count: 1 },
+    WWIR: { name: 'WWIR', sections: ['SUMMARY'], size_kind: 'fixed', size_count: 1 },
+    GGOR: { name: 'GGOR', sections: ['SUMMARY'], size_kind: 'fixed', size_count: 1 },
+    WOPT: { name: 'WOPT', sections: ['SUMMARY'], size_kind: 'fixed', size_count: 1 },
   };
 
   it('accepts bare field-scope mnemonics', () => {
@@ -732,13 +736,21 @@ describe('computeDiagnostics — SUMMARY mnemonics (issue #15)', () => {
     expect(computeDiagnostics(lines, summaryIndex)).toEqual([]);
   });
 
-  it('accepts well/group mnemonics closed by a standalone /', () => {
+  it('accepts well/group mnemonics with just a bare /', () => {
+    // "Apply to every well/group" form from the issue body.
     const lines = ['SUMMARY', 'WOPR', '/', 'GGOR', '/', 'WOPT', '/'];
     expect(computeDiagnostics(lines, summaryIndex)).toEqual([]);
   });
 
-  it('accepts well mnemonics followed by a list of well names', () => {
-    const lines = ['SUMMARY', 'WOPR', "'W1' 'W2' /", '/'];
+  it('accepts a well mnemonic followed by a list of well names', () => {
+    // Exact shape from the user's report — must not trigger
+    // "missing terminating '/'". WWIR is a single-record keyword;
+    // the '/' on the same line as the well list is the record terminator.
+    const lines = [
+      'SUMMARY',
+      'WWIR',
+      " 'C-1H' 'C-2H' 'C-3H' 'C-4H' 'C-4AH' 'F-1H' 'F-2H' 'F-3H' 'F-4H' /",
+    ];
     expect(computeDiagnostics(lines, summaryIndex)).toEqual([]);
   });
 
