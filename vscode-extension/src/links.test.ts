@@ -1,4 +1,5 @@
 import { findFileReferences } from './links';
+import { parsePathsAliases, resolvePathAlias } from './paths';
 
 describe('findFileReferences — INCLUDE (existing behaviour)', () => {
   it('finds an INCLUDE path on the next line', () => {
@@ -102,6 +103,44 @@ describe('findFileReferences — IMPORT / RESTART / GDFILE (issue #17)', () => {
       ['GDFILE', 'c.EGRID'],
       ['RESTART', 'd'],
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Composition: PATHS aliases must expand for *every* file-link keyword,
+// not just INCLUDE. This mirrors what the link provider does.
+// ---------------------------------------------------------------------------
+
+describe('PATHS aliases resolve for all file-link keywords', () => {
+  const deck = [
+    'RUNSPEC',
+    'PATHS',
+    " 'INC' '../include' /",
+    " 'GRD' '/data/grids' /",
+    " 'RST' '../prior' /",
+    '/',
+    'GRID',
+    'INCLUDE',
+    " '$INC/grid/PERM.grdecl' /",
+    'IMPORT',
+    " '$GRD/CASE.FEGRID' 'FORMATTED' /",
+    'GDFILE',
+    " '$GRD/CASE.EGRID' /",
+    'SOLUTION',
+    'RESTART',
+    " '$RST/MYCASE' 5 /",
+  ];
+
+  it.each([
+    ['INCLUDE', '../include/grid/PERM.grdecl'],
+    ['IMPORT',  '/data/grids/CASE.FEGRID'],
+    ['GDFILE',  '/data/grids/CASE.EGRID'],
+    ['RESTART', '../prior/MYCASE'],
+  ])('expands $ALIAS in %s', (keyword, expanded) => {
+    const aliases = parsePathsAliases(deck);
+    const ref = findFileReferences(deck).find(r => r.keyword === keyword);
+    expect(ref).toBeDefined();
+    expect(resolvePathAlias(ref!.rawPath, aliases)).toBe(expanded);
   });
 });
 
