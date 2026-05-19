@@ -846,6 +846,34 @@ describe('computeDiagnostics — templated tracer mnemonics', () => {
 });
 
 // ---------------------------------------------------------------------------
+// User-defined FIP region templates — FIP + <REGION> resolves to FIP
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — templated FIP region keywords', () => {
+  // FIP is documented in the OPM manual as a base name to which users
+  // append a 1-5 character region label (FIPZON, FIPGL, FIPNL, FIPUNIT,
+  // FIPHC, …). The build script tags FIP as templated so any
+  // FIP+[A-Z0-9]+ deck token resolves to the FIP entry.
+  const fipIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    FIP:    { name: 'FIP',    sections: ['REGIONS'], templated: true },
+    FIPNUM: { name: 'FIPNUM', sections: ['REGIONS'], size_kind: 'array' },
+  };
+
+  it('accepts a user-defined FIPZON region keyword (issue example)', () => {
+    const lines = ['REGIONS', 'FIPZON', ' 1 1 1 1 1', ' 1 /'];
+    expect(computeDiagnostics(lines, fipIndex)).toEqual([]);
+  });
+
+  it('still routes FIPNUM through its direct entry, not the FIP template', () => {
+    // Direct lookup wins over the template fallback, so FIPNUM keeps
+    // its own (array-shape) entry and isn't misclassified as a FIP.
+    const lines = ['REGIONS', 'FIPNUM', ' 1 2 3 /'];
+    expect(computeDiagnostics(lines, fipIndex)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TITLE — free-form text on the next line, no '/' terminator
 // ---------------------------------------------------------------------------
 
