@@ -86,8 +86,20 @@ export const NUMERIC_TOKEN_RE = /^(\*|\d+\*|[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)
 export const KEYWORD_TOKEN_RE = /^[A-Z][A-Z0-9_+-]*$/;
 
 /** Matches a line that is just a keyword declaration (with optional trailing
- *  comment or `/`), as opposed to a record line. */
+ *  comment or `/`), as opposed to a record line. Permissive: accepts leading
+ *  whitespace so diagnostics can flag indented keywords. Cursor-driven
+ *  features (active-keyword lookup, docs panel, folding) should prefer the
+ *  stricter `KEYWORD_LINE_COL1_RE` instead — OPM Flow only recognises a
+ *  keyword when it starts in column 1, and an indented uppercase token is
+ *  more plausibly an unquoted string value than a misplaced keyword. */
 export const KEYWORD_LINE_RE = /^\s*([A-Z][A-Z0-9_+-]{1,})\s*(?:--|\/\s*(?:--|$)|$)/;
+
+/** Column-1-anchored form of `KEYWORD_LINE_RE`. Use this for editor
+ *  features (docs panel, hover, folding, active-keyword scan) so they
+ *  agree with OPM Flow's parser: only column-1 declarations are real
+ *  keywords. An indented `THPRES /` under EQLOPTS, for example, is a
+ *  record value — not a new THPRES block. */
+export const KEYWORD_LINE_COL1_RE = /^([A-Z][A-Z0-9_+-]{1,})\s*(?:--|\/\s*(?:--|$)|$)/;
 
 /** Same shape as KEYWORD_LINE_RE but accepts lowercase letters too — used by
  *  diagnostics to detect keywords typed in non-uppercase form, which OPM Flow

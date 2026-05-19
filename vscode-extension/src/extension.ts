@@ -9,7 +9,7 @@ import {
   RecordLine,
   parseRecordLine,
   isCommentLine,
-  KEYWORD_LINE_RE,
+  KEYWORD_LINE_COL1_RE,
   SECTION_KEYWORDS,
   SECTION_KEYWORD_SET,
   formatRecordGroup,
@@ -93,7 +93,7 @@ function findActiveKeyword(document: vscode.TextDocument, position: vscode.Posit
   for (let lineNum = position.line; lineNum >= 0; lineNum--) {
     const text = document.lineAt(lineNum).text;
     if (text.trim().startsWith('--')) continue;
-    const m = text.match(KEYWORD_LINE_RE);
+    const m = text.match(KEYWORD_LINE_COL1_RE);
     if (m) return m[1];
   }
   return null;
@@ -110,7 +110,7 @@ function findActiveKeywordLine(
   for (let lineNum = position.line; lineNum >= 0; lineNum--) {
     const text = document.lineAt(lineNum).text;
     if (text.trim().startsWith('--')) continue;
-    if (KEYWORD_LINE_RE.test(text)) return lineNum;
+    if (KEYWORD_LINE_COL1_RE.test(text)) return lineNum;
   }
   return -1;
 }
@@ -162,15 +162,10 @@ function findCurrentSection(document: vscode.TextDocument, position: vscode.Posi
   for (let lineNum = position.line; lineNum >= 0; lineNum--) {
     const text = document.lineAt(lineNum).text;
     if (text.trim().startsWith('--')) continue;
-    const m = text.match(KEYWORD_LINE_RE);
+    const m = text.match(KEYWORD_LINE_COL1_RE);
     if (m && SECTION_KEYWORD_SET.has(m[1])) return m[1];
   }
   return null;
-}
-
-function wordAtPosition(document: vscode.TextDocument, position: vscode.Position): string {
-  const range = document.getWordRangeAtPosition(position, /[A-Z][A-Z0-9_-]*/);
-  return range ? document.getText(range) : '';
 }
 
 const TEMPLATE_SUFFIX_RE = /^[A-Z0-9]+$/;
@@ -684,7 +679,7 @@ class OpmFlowFoldingRangeProvider implements vscode.FoldingRangeProvider {
       const text = document.lineAt(i).text;
       if (text.trim().startsWith('--')) continue;
 
-      const m = text.match(KEYWORD_LINE_RE);
+      const m = text.match(KEYWORD_LINE_COL1_RE);
       if (!m) continue;
 
       const kw = m[1];
@@ -796,9 +791,15 @@ export function activate(context: vscode.ExtensionContext): void {
     const pos = editor.selection.active;
     const line = editor.document.lineAt(pos).text;
 
-    const word = wordAtPosition(editor.document, pos);
+    // Only treat the word at the cursor as a keyword *declaration* when it
+    // starts in column 1. OPM Flow only recognises keywords there, so an
+    // indented uppercase token (e.g. `THPRES` on ` THPRES /` under EQLOPTS)
+    // is a record value, not the THPRES keyword — fall through to the
+    // active-keyword + column lookup below.
+    const wordRange = editor.document.getWordRangeAtPosition(pos, /[A-Z][A-Z0-9_-]*/);
+    const word = wordRange ? editor.document.getText(wordRange) : '';
     const wordEntry = word ? resolveKeyword(index, word) : undefined;
-    if (wordEntry) {
+    if (wordEntry && wordRange?.start.character === 0) {
       docsProvider.update(wordEntry);
       return;
     }
@@ -944,10 +945,15 @@ export function activate(context: vscode.ExtensionContext): void {
     provideHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | undefined {
       const line = document.lineAt(position).text;
 
-      const word = wordAtPosition(document, position);
+      // Same column-1 discipline as the docs panel: an indented uppercase
+      // token is a record value, not a keyword declaration, even when its
+      // name happens to match an index entry (THPRES under EQLOPTS, …).
+      const wordRange = document.getWordRangeAtPosition(position, /[A-Z][A-Z0-9_-]*/);
+      const word = wordRange ? document.getText(wordRange) : '';
+      const wordAtCol1 = wordRange?.start.character === 0;
       const excluded = getExcludedKeywords(document.uri);
       const wordEntry = word ? resolveKeyword(index, word) : undefined;
-      if (word && wordEntry) {
+      if (word && wordEntry && wordAtCol1) {
         const currentSection = findCurrentSection(document, position);
         return new vscode.Hover(
           buildKeywordHover(wordEntry, currentSection, excluded.has(word)),
@@ -956,7 +962,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
       // Excluded keyword not in the index: still show a short notice so the
       // user knows why no diagnostics or docs appear on it.
-      if (word && excluded.has(word)) {
+      if (word && wordAtCol1 && excluded.has(word)) {
         const md = new vscode.MarkdownString();
         md.supportHtml = true;
         md.appendMarkdown(`## \`${word}\`\n\n`);
