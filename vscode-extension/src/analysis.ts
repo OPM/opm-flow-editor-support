@@ -61,6 +61,22 @@ export interface AnalysisEntry {
    * must not trigger a missing-terminator diagnostic.
    */
   variadic_record?: boolean;
+  /**
+   * True when the keyword's record body is optional — i.e. the bare
+   * keyword on a line by itself (no values, no '/') is a valid usage.
+   * Used by non-F SUMMARY mnemonics that may either list names or be
+   * written bare to mean "all", and that can be stacked back-to-back
+   * with no intervening '/':
+   *
+   *     GMWPR
+   *     GMWIN
+   *     /
+   *
+   * When ``recordCount === 0`` the close-block terminator check is
+   * skipped; once any value tokens appear, the usual array/list rules
+   * apply so a forgotten closing '/' still gets flagged.
+   */
+  optional_body?: boolean;
 }
 
 export type AnalysisIndex = Record<string, AnalysisEntry>;
@@ -200,9 +216,17 @@ export function computeDiagnostics(
 
   const closeKw = (): void => {
     if (!activeKw) return;
+    // Optional-body keywords (non-F SUMMARY mnemonics) may appear bare
+    // and stacked, so a block that consumed no records doesn't need a
+    // closing '/'. Once values are present the normal array/list rule
+    // applies again.
+    const bareOptionalBody = activeKw.optional_body && recordCount === 0;
     const needsTerminator =
-      (activeKw.size_kind === 'list' && !listTerminatorSeen) ||
-      (activeKw.size_kind === 'array' && !arrayTerminatorSeen);
+      !bareOptionalBody
+      && (
+        (activeKw.size_kind === 'list' && !listTerminatorSeen) ||
+        (activeKw.size_kind === 'array' && !arrayTerminatorSeen)
+      );
     if (needsTerminator) {
       // Anchor the squiggle at the end of the last record when we have one,
       // otherwise at the keyword name itself.
