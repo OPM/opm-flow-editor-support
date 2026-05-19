@@ -1020,6 +1020,71 @@ describe('computeDiagnostics — MESSAGES variadic record', () => {
 });
 
 // ---------------------------------------------------------------------------
+// VFPPROD / VFPINJ — multi-record tables with multi-line records and no
+// standalone closing '/'
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — VFPPROD multi-line record bodies', () => {
+  // VFPPROD: header record + 5 axis records + repeating BHP-table record.
+  // Each axis and BHP record spans many lines and ends with '/'. The block
+  // itself does NOT end with a standalone '/' — the trailing record's '/'
+  // is the natural end. Reclassified to 'fixed' so closeKw doesn't demand
+  // a list terminator, plus variadic_record so per-line missing-/ checks
+  // are suppressed on the multi-line axis/BHP rows.
+  const vfpIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    VFPPROD: {
+      name: 'VFPPROD',
+      sections: ['SCHEDULE'],
+      size_kind: 'fixed',
+      size_count: 7,
+      variadic_record: true,
+      records_meta: [
+        { expected_columns: 9 }, {}, {}, {}, {}, {}, {},
+      ],
+    },
+  };
+
+  it('accepts the user-reported header + LIQ + THP form', () => {
+    const lines = [
+      'SCHEDULE',
+      'VFPPROD',
+      '-- Table   Datum Depth   Rate Type   WFR Type   GFR Type   THP Type   ALQ Type    UNITS     TAB Type',
+      '       1          1535         LIQ        WCT        GOR        THP       PUMP     METRIC        BHP /',
+      '-- LIQ units',
+      '  100.0   123.0   151.0   185.0   228.0',
+      '  280.0   344.0   423.0   519.0   638.0',
+      '  784.0   963.0  1183.0  1454.0  1786.0',
+      ' 2194.0  2696.0  3312.0  4070.0  5000.0 /',
+      '-- THP units',
+      '   2.00   18.00   35.00   51.00   68.00',
+      '  84.00  101.00  117.00  134.00  150.00 /',
+    ];
+    expect(computeDiagnostics(lines, vfpIndex)).toEqual([]);
+  });
+
+  it('does not demand a standalone closing / on the block', () => {
+    // The next keyword (WELSPECS) ends the VFPPROD block naturally;
+    // closeKw must not emit a list-terminator diagnostic.
+    const lines = [
+      'SCHEDULE',
+      'VFPPROD',
+      ' 1 1535 LIQ WCT GOR THP PUMP METRIC BHP /',
+      ' 100 200 300 /',
+      ' 1 2 /',
+      ' 0.4 /',
+      ' 0.5 /',
+      ' 100 /',
+      ' 1 1 1 1 12.5 /',
+      'WELSPECS',
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, vfpIndex);
+    expect(diags.some(d => /VFPPROD.*missing terminating/.test(d.message))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TITLE — free-form text on the next line, no '/' terminator
 // ---------------------------------------------------------------------------
 
