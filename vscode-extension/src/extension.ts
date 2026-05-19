@@ -776,9 +776,76 @@ function debounce<T extends unknown[]>(fn: (...args: T) => void, ms: number): (.
   };
 }
 
+// ---------------------------------------------------------------------------
+// Additional file extensions — `opm-flow.additionalFileExtensions`
+// ---------------------------------------------------------------------------
+
+/** Read and normalise the user's extra-extensions setting. Accepts entries
+ *  with or without a leading '.'; matches case-insensitively. */
+function getAdditionalFileExtensions(resource?: vscode.Uri): Set<string> {
+  const raw = vscode.workspace
+    .getConfiguration('opm-flow', resource ?? null)
+    .get<string[]>('additionalFileExtensions', []);
+  const out = new Set<string>();
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue;
+    let s = entry.trim();
+    if (!s) continue;
+    if (s.startsWith('.')) s = s.slice(1);
+    if (s) out.add(s.toLowerCase());
+  }
+  return out;
+}
+
+/** If the document's extension matches one of the user-configured extras
+ *  and the document isn't already opm-flow, retag it. Failures (closed
+ *  document, virtual scheme, etc.) are silently ignored. */
+async function retagDocumentIfMatches(
+  doc: vscode.TextDocument,
+  extensions: Set<string>,
+): Promise<void> {
+  if (extensions.size === 0) return;
+  if (doc.languageId === 'opm-flow') return;
+  const fileName = doc.fileName ?? doc.uri.path ?? '';
+  const dotIdx = fileName.lastIndexOf('.');
+  if (dotIdx < 0) return;
+  const ext = fileName.slice(dotIdx + 1).toLowerCase();
+  if (!ext || !extensions.has(ext)) return;
+  try {
+    await vscode.languages.setTextDocumentLanguage(doc, 'opm-flow');
+  } catch {
+    // The doc may have been closed, or its scheme may not support
+    // language reassignment — both are fine to skip.
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const index = loadKeywordIndex(context);
   const keywords = Object.keys(index);
+
+  // --- Additional file extensions ---
+  // Retag any open file whose extension is listed in
+  // `opm-flow.additionalFileExtensions` and watch for new opens + config
+  // changes. The extension activates `onStartupFinished` so this works on
+  // first open of an unknown-extension file too.
+  const retagAllOpenDocuments = (): void => {
+    const exts = getAdditionalFileExtensions();
+    if (exts.size === 0) return;
+    for (const doc of vscode.workspace.textDocuments) {
+      void retagDocumentIfMatches(doc, exts);
+    }
+  };
+  retagAllOpenDocuments();
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument(doc => {
+      void retagDocumentIfMatches(doc, getAdditionalFileExtensions(doc.uri));
+    }),
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('opm-flow.additionalFileExtensions')) {
+        retagAllOpenDocuments();
+      }
+    }),
+  );
 
   // --- Sidebar docs panel ---
   const docsProvider = new DocsViewProvider(context.extensionUri, index);

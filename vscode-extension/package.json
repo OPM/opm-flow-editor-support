@@ -31,7 +31,8 @@
   ],
   "activationEvents": [
     "onLanguage:opm-flow",
-    "onView:opm-flow.docsView"
+    "onView:opm-flow.docsView",
+    "onStartupFinished"
   ],
   "main": "./out/extension",
   "contributes": {
@@ -194,6 +195,15 @@
             "RPTSCHED"
           ],
           "description": "Keywords to skip when computing diagnostics (no squiggles for unknown-keyword, wrong-section, arity, or missing-'/' checks). Names are matched case-insensitively after upper-casing — OPM Flow keywords are conventionally uppercase. Use this for keywords whose record bodies don't fit the generic record model and produce noisy false positives.",
+          "scope": "resource"
+        },
+        "opm-flow.additionalFileExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra file extensions (with or without a leading '.') that should open as OPM Flow. Useful for project-specific include-file conventions not covered by the built-in extension list. Matched case-insensitively. Example: [\".myinc\", \"props2\"]. For one-off cases the VS Code-native `files.associations` setting still works too.",
           "scope": "resource"
         }
       }
