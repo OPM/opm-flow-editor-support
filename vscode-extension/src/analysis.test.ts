@@ -646,6 +646,31 @@ describe('computeDiagnostics — unquoted string values', () => {
     expect(diags.some(d => d.message.includes('INCLUDE is not a recognised'))).toBe(false);
   });
 
+  it('treats an indented known-keyword name as a record value (EQLOPTS / THPRES)', () => {
+    // THPRES is both a real SOLUTION keyword *and* a valid EQLOPTS
+    // option name. Indented (not in column 1) under an open EQLOPTS
+    // block it must be parsed as the EQLOPTS record value, not as a
+    // misplaced THPRES keyword declaration.
+    const eqloptsIndex: Record<string, AnalysisEntry> = {
+      ...stringIndex,
+      EQLOPTS: {
+        name: 'EQLOPTS',
+        sections: ['RUNSPEC'],
+        size_kind: 'fixed',
+        size_count: 1,
+        expected_columns: 4,
+      },
+      THPRES: {
+        name: 'THPRES',
+        sections: ['SOLUTION'],
+        size_kind: 'list',
+        expected_columns: 3,
+      },
+    };
+    const lines = ['RUNSPEC', 'EQLOPTS', ' THPRES  /'];
+    expect(computeDiagnostics(lines, eqloptsIndex)).toEqual([]);
+  });
+
   it('still flags a typo once the block is finished', () => {
     // After INCFIX's single record terminates with '/', the block is done.
     // A subsequent unknown identifier IS a typo, not a string value.

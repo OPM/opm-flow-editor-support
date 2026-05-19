@@ -28,7 +28,7 @@
     },
     "keywords": {
       "name": "keyword.control.opm-flow",
-      "match": "^\\s*[A-Z][A-Z0-9_+-]*\\s*$|^\\s*[A-Z][A-Z0-9_+-]*(?=\\s)"
+      "match": "^[A-Z][A-Z0-9_+-]*\\s*$|^[A-Z][A-Z0-9_+-]*(?=\\s)"
     },
     "strings": {
       "name": "string.quoted.single.opm-flow",

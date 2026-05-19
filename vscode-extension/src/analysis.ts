@@ -288,14 +288,17 @@ export function computeDiagnostics(
       }
 
       // A single uppercase identifier mid-block is more plausibly an
-      // unquoted string value (e.g. `INCLUDE` <newline> `PATH`) than a new
-      // keyword. If the active keyword's block is still expecting records
-      // and the token is not itself a known keyword (or excluded), fall
-      // through to record parsing instead of starting a new keyword.
+      // unquoted string value (e.g. `INCLUDE` <newline> `PATH`, or
+      // `EQLOPTS` <newline> ` THPRES /`) than a new keyword. Treat it
+      // as a record when the active block still expects records and
+      // either (a) the token is not a known keyword, or (b) it is
+      // indented — OPM Flow only recognises keywords in column 1, so
+      // an indented uppercase token cannot start a new keyword even
+      // if its name happens to be in the index (THPRES, INCLUDE, …).
       const entry = lookupEntry(index, kw);
       const treatAsRecord =
         activeKw !== null
-        && !entry
+        && (!entry || indent > 0)
         && !excludedKeywords.has(kw)
         && expectsMoreRecords(activeKw, recordCount, listTerminatorSeen, arrayTerminatorSeen);
 
