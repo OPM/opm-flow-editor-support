@@ -867,6 +867,58 @@ describe('computeDiagnostics — variadic-record keywords', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Issue #12 — TUNING is fixed/3 multi-record, not list. No closing '/'.
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — TUNING (issue #12)', () => {
+  // TUNING is a 3-record keyword: records 1/2/3 have 10/13/11 columns.
+  // It does NOT close with a standalone '/'. Pre-fix, the engine treated
+  // it as size_kind='list' and demanded a trailing terminator, flagging
+  // the example deck from the issue.
+  const tuningIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    TUNING: {
+      name: 'TUNING',
+      sections: ['SCHEDULE'],
+      size_kind: 'fixed',
+      size_count: 3,
+      records_meta: [
+        { expected_columns: 10 },
+        { expected_columns: 13 },
+        { expected_columns: 11 },
+      ],
+    },
+  };
+
+  it('accepts the issue-reported 3-record TUNING block', () => {
+    const lines = [
+      'SCHEDULE',
+      'TUNING',
+      ' 1 10 0.1 0.15 3 0.3 0.3 1.2 /',
+      ' 5* 0.1 0.0001 0.02 0.02 /',
+      ' 2* 40 1* 15 /',
+    ];
+    expect(computeDiagnostics(lines, tuningIndex)).toEqual([]);
+  });
+
+  it('does not demand a closing standalone / after TUNING', () => {
+    const lines = [
+      'SCHEDULE',
+      'TUNING',
+      ' 1 10 0.1 0.15 3 0.3 0.3 1.2 /',
+      ' 5* 0.1 0.0001 0.02 0.02 /',
+      ' 2* 40 1* 15 /',
+      'WELSPECS',
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, tuningIndex);
+    // The only legitimate diagnostic candidate would be on WELSPECS itself,
+    // but it's a valid SCHEDULE keyword closed by '/', so no diagnostics.
+    expect(diags).toEqual([]);
+  });
+});
+
 describe('computeDiagnostics — TITLE accepts a bare title line', () => {
   const titleIndex: Record<string, AnalysisEntry> = {
     ...index,

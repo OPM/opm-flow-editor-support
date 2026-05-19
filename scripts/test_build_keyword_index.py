@@ -694,6 +694,31 @@ class TestClassifySize:
         opm = {"size": "UNKNOWN", "items": [{"name": "DATA"}]}
         assert _classify_size(opm) == ("list", None)
 
+    def test_records_with_int_size_is_fixed_count(self):
+        # TUNING-style: a fixed multi-record keyword (size=3, 3 records).
+        # These do NOT close with a standalone '/'; size_kind must be
+        # "fixed" with size_count=size, not "list" — otherwise the
+        # diagnostics engine demands a trailing terminator that real
+        # decks never write. Issue #12.
+        opm = {
+            "size": 3,
+            "records": [
+                [{"name": "A"}], [{"name": "B"}], [{"name": "C"}],
+            ],
+        }
+        assert _classify_size(opm) == ("fixed", 3)
+
+    def test_records_without_int_size_stays_list(self):
+        # WELSEGS-style: variadic multi-record (size=None or unset).
+        # The trailing record absorbs all remaining rows and the block
+        # ends with a standalone '/', so size_kind="list" is correct.
+        opm = {
+            "records": [
+                [{"name": "A"}], [{"name": "B"}],
+            ],
+        }
+        assert _classify_size(opm) == ("list", None)
+
     def test_items_without_size_default_to_list(self):
         opm = {"items": [{"name": "X"}]}
         assert _classify_size(opm) == ("list", None)
