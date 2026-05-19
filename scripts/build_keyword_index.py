@@ -97,9 +97,15 @@ def _classify_size(opm_data: dict) -> tuple[str, Optional[int]]:
     has_data    = "data" in opm_data
     if size == 0:
         return "none", 0
-    # Multi-record keywords (WELSEGS, VFPPROD, COMPSEGS, …) always end with
-    # a standalone '/' line after the (variadic) trailing record, so they
-    # are list-kind for terminator-diagnostic purposes.
+    # Multi-record keywords with an *integer* size (TUNING/TUNINGL/TUNINGS,
+    # PLYSHLOG, PRORDER, PYACTION) have a fixed record count and no
+    # standalone '/' terminator after the last record — classify them as
+    # "fixed" so the diagnostics engine doesn't demand a closing '/'.
+    if has_records and isinstance(size, int) and size >= 1:
+        return "fixed", size
+    # Variadic multi-record keywords (WELSEGS, VFPPROD, COMPSEGS, …) have
+    # size=None or a string sentinel ("UNKNOWN") and DO end with a
+    # standalone '/' after the trailing record — those stay list-kind.
     if has_records:
         return "list", None
     if isinstance(size, int) and size >= 1:
