@@ -1021,6 +1021,54 @@ def _summary_size_shape(mnemonic: str) -> tuple[str, Optional[int]]:
     return "fixed", 1
 
 
+def _parse_performance_table(rows, section_fodt: Path) -> dict:
+    """
+    Parse the "OPM Flow Simulation Performance" table. Shape is
+    ``Variable Description | Variable | Comment`` — the keyword name is
+    in column 1 and the long description in column 0. These mnemonics
+    (TCPUDAY, ELAPSED, MAXDPR, …) are written bare with no terminating
+    '/', so they get ``size_kind: "none"``.
+    """
+    out: dict = {}
+    # Header row identifies column positions
+    header = [t.strip() for t, _ in rows[1]]
+    try:
+        desc_col = header.index("Variable Description")
+        var_col = header.index("Variable")
+    except ValueError:
+        return out
+    try:
+        cmt_col = header.index("Comment")
+    except ValueError:
+        cmt_col = None
+
+    for row in rows[2:]:
+        cells = [t for t, _ in row]
+        if var_col >= len(cells):
+            continue
+        mnemonic = cells[var_col].strip()
+        if not mnemonic or not mnemonic.isupper():
+            continue
+        description = cells[desc_col].strip() if desc_col < len(cells) else ""
+        comment = cells[cmt_col].strip() if cmt_col is not None and cmt_col < len(cells) else ""
+        summary = description
+        if comment and "No data written" not in comment:
+            summary = f"{description} ({comment})" if description else comment
+        out[mnemonic] = {
+            "name":        mnemonic,
+            "section":     "SUMMARY",
+            "supported":   None,
+            "summary":     summary,
+            "description": summary,
+            "parameters":  [],
+            "examples":    [],
+            "full_text":   summary,
+            "source_file": str(section_fodt),
+            "size_kind":   "none",
+        }
+    return out
+
+
 def _parse_control_mode_table(rows, section_fodt: Path) -> dict:
     """
     Parse a "Field and Group Control Mode Reporting" / "Well Control Mode
@@ -1122,6 +1170,16 @@ def parse_summary_mnemonics(section_fodt: Path) -> dict:
         # first cell is "Mnemonic" rather than as scope columns in a header.
         if "Control Mode Reporting" in title:
             for name, entry in _parse_control_mode_table(rows, section_fodt).items():
+                if name not in out:
+                    out[name] = entry
+            continue
+
+        # The OPM Flow Simulation Performance table has yet another shape:
+        # `Variable Description | Variable | Comment`. The keyword name is
+        # in column 1 (TCPUDAY, ELAPSED, MAXDPR, …) and these are all
+        # written bare with no terminator.
+        if "OPM Flow Simulation Performance" in title:
+            for name, entry in _parse_performance_table(rows, section_fodt).items():
                 if name not in out:
                     out[name] = entry
             continue

@@ -1202,13 +1202,30 @@ class TestParseSummaryMnemonics:
         assert "Well Mode of Control" in out["WMCTL"]["summary"]
         assert out["WMCTL"]["size_kind"] == "fixed"
 
-    def test_ignores_tables_without_root_column(self, tmp_path):
-        # The performance-counter table has a "Variable Description |
-        # Variable | Comment" shape with no "Root" column; it must not
-        # be misinterpreted as a mnemonic table.
-        title = _row("OPM Flow Simulation Performance Summary Variables")
+    def test_picks_up_performance_table(self, tmp_path):
+        # The "OPM Flow Simulation Performance" table has a different
+        # shape — "Variable Description | Variable | Comment". The
+        # keyword name lives in column 1 and these mnemonics are bare
+        # (no '/').
+        title = _row("OPM Flow Simulation Performance")
         header = _row("Variable Description", "Variable", "Comment")
-        data = _row("Wall clock time", "TCPU", "")
+        data1 = _row("CPU - CPU time per day.", "TCPUDAY", "")
+        data2 = _row("Elapsed - Elapsed time in seconds.", "ELAPSED",
+                     "No data written to file.")
+        body = _table(title, header, data1, data2)
+        fodt = self._write_section_fodt(tmp_path, body)
+        out = parse_summary_mnemonics(fodt)
+        assert out["TCPUDAY"]["size_kind"] == "none"
+        assert "size_count" not in out["TCPUDAY"]
+        assert "CPU time per day" in out["TCPUDAY"]["summary"]
+        assert out["ELAPSED"]["size_kind"] == "none"
+
+    def test_ignores_tables_with_no_recognised_shape(self, tmp_path):
+        # Tables that are neither core mnemonic shape, nor Control Mode,
+        # nor Performance must be skipped (no false-positive entries).
+        title = _row("Some Other Table")
+        header = _row("Column A", "Column B")
+        data = _row("foo", "bar")
         body = _table(title, header, data)
         fodt = self._write_section_fodt(tmp_path, body)
         assert parse_summary_mnemonics(fodt) == {}
