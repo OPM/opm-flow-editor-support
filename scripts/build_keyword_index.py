@@ -55,6 +55,19 @@ RAW_TEXT_KEYWORDS = frozenset({"TITLE"})
 # like FIPZON, FIPGL, FIPNL, FIPUNIT, FIPHC, ….
 TEMPLATE_KEYWORD_NAMES = frozenset({"TVDP", "FIP"})
 
+# Keywords whose single record is conventionally spread across multiple
+# lines, with only the line carrying '/' completing the record. opm-common's
+# size_type rarely flags these (the items aren't ``size_type: "ALL"``), but
+# real decks routinely split them — MESSAGES is the canonical case: 12-13
+# INT values laid out as print-limits then stop-limits across two lines:
+#
+#     MESSAGES
+#       80000 10000 5000000 5000  300   1
+#       80000 10000 5000000 80000  10   1 /
+#
+# Tag these explicitly so per-line missing-'/' diagnostics are suppressed.
+VARIADIC_RECORD_KEYWORDS = frozenset({"MESSAGES"})
+
 
 def _has_variable_arity_item(opm_items: list[dict]) -> bool:
     """
@@ -1363,6 +1376,16 @@ def build_index(manual_dir: Path) -> dict:
         targets = entry if isinstance(entry, list) else [entry]
         for e in targets:
             e["templated"] = True
+
+    # Mark keywords whose single record canonically spans multiple lines
+    # so per-line missing-'/' diagnostics are suppressed (MESSAGES, …).
+    for name in VARIADIC_RECORD_KEYWORDS:
+        entry = index.get(name)
+        if entry is None:
+            continue
+        targets = entry if isinstance(entry, list) else [entry]
+        for e in targets:
+            e["variadic_record"] = True
 
     # UDQ SUMMARY mnemonics are documented under placeholder names of the
     # form ``<scope-prefix>UX{2,}`` (FUXXXXXX, WUXXXXXX, …) — the trailing

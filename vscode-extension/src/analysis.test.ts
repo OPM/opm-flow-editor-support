@@ -977,6 +977,49 @@ describe('computeDiagnostics — UDQ SUMMARY mnemonic templates', () => {
 });
 
 // ---------------------------------------------------------------------------
+// MESSAGES — single 13-value record canonically split across multiple lines
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — MESSAGES variadic record', () => {
+  // MESSAGES is a single record with 13 INT parameters, but real decks
+  // routinely split it as print-limits then stop-limits across two lines
+  // with the trailing '/' closing the whole record. Tagged variadic_record
+  // so per-line missing-/ diagnostics are suppressed.
+  const messagesIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    MESSAGES: {
+      name: 'MESSAGES',
+      sections: ['RUNSPEC'],
+      size_kind: 'fixed',
+      size_count: 1,
+      expected_columns: 13,
+      variadic_record: true,
+    },
+  };
+
+  it('accepts the print-limits / stop-limits split form (issue example)', () => {
+    const lines = [
+      'RUNSPEC',
+      'MESSAGES',
+      '-- mess comm  warn    prob  err  bug ',
+      '  80000 10000 5000000 5000  300   1 ',
+      '-- mess comm  warn    prob  err bug ',
+      '  80000 10000 5000000 80000 10   1 /',
+    ];
+    expect(computeDiagnostics(lines, messagesIndex)).toEqual([]);
+  });
+
+  it('also accepts a heavily-decorated single-line form', () => {
+    const lines = [
+      'RUNSPEC',
+      'MESSAGES',
+      '  80000 10000 5000000 5000 300 1 80000 10000 5000000 80000 10 1 /',
+    ];
+    expect(computeDiagnostics(lines, messagesIndex)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TITLE — free-form text on the next line, no '/' terminator
 // ---------------------------------------------------------------------------
 
