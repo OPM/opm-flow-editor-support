@@ -945,6 +945,38 @@ describe('computeDiagnostics — SUMMARY mnemonic list bodies', () => {
 });
 
 // ---------------------------------------------------------------------------
+// UDQ SUMMARY mnemonics — WU<UDQ-name>, FU<UDQ-name>, … resolve via
+// scope-prefix templates (WU, FU, GU, CU, RU, SU)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — UDQ SUMMARY mnemonic templates', () => {
+  // UDQ summary mnemonics are documented in the manual under placeholder
+  // names FUXXXXXX/WUXXXXXX/etc. The build script strips the trailing X's
+  // and marks the prefix entry templated so deck tokens like WUWI1 or
+  // FUOIL resolve through the standard <base>+[A-Z0-9]+ fallback.
+  const udqIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    FU: { name: 'FU', sections: ['SUMMARY'], size_kind: 'none', templated: true },
+    WU: { name: 'WU', sections: ['SUMMARY'], size_kind: 'array', optional_body: true, templated: true },
+  };
+
+  it('recognises WUWI1 (issue example) as a templated WU mnemonic', () => {
+    const lines = ['SUMMARY', 'WUWI1'];
+    expect(computeDiagnostics(lines, udqIndex)).toEqual([]);
+  });
+
+  it('recognises FUOIL as a templated FU mnemonic', () => {
+    const lines = ['SUMMARY', 'FUOIL'];
+    expect(computeDiagnostics(lines, udqIndex)).toEqual([]);
+  });
+
+  it('accepts a WU<name> body of wells closed by /', () => {
+    const lines = ['SUMMARY', 'WUWI1', "  'PROD1' 'PROD2' /"];
+    expect(computeDiagnostics(lines, udqIndex)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TITLE — free-form text on the next line, no '/' terminator
 // ---------------------------------------------------------------------------
 
