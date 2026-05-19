@@ -1044,15 +1044,26 @@ def _summary_size_shape(mnemonic: str) -> tuple[str, Optional[int]]:
     Field-scope mnemonics (F-prefix: FOPR, FWPR, …) are written bare with
     no terminating '/' — ``size_kind: 'none'``.
 
-    Every other scope (G/W/C/L/R/B/A/N/S…) takes a *single* record that
-    is either a list of names (``WOPR \\n 'W1' 'W2' /``) or just a bare
-    '/' meaning "all" (``WOPR \\n /``). That's ``size_kind: 'fixed'``
-    with ``size_count: 1`` — modelling it as 'list' wrongly demands a
-    second standalone '/' to close the block.
+    Every other scope (G/W/C/L/R/B/A/N/S…) takes a single block whose
+    payload is a list of names — well, group, region, completion, …
+    — spread freely across one or more lines and closed by a single '/':
+
+        WOPR
+          'PROD1'
+          'PROD2'
+        /
+
+    ``size_kind: 'array'`` matches that shape: arity and per-line
+    terminator checks are skipped, and the engine only insists on a
+    single closing '/' (either trailing on the last value line or on
+    its own line). 'fixed'/1 was almost right for the common one-line
+    form (``WOPR \\n 'W1' 'W2' /``) but mis-flagged every intermediate
+    line of the multi-line form as missing the terminating '/'. 'list'
+    would similarly mis-demand a per-record '/'.
     """
     if mnemonic.startswith("F"):
         return "none", None
-    return "fixed", 1
+    return "array", None
 
 
 def _parse_performance_table(rows, section_fodt: Path) -> dict:
