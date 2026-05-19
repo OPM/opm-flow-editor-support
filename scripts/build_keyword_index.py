@@ -46,6 +46,12 @@ OPM_COMMON_DIALECTS = ("000_Eclipse100", "001_Eclipse300", "002_Frontsim", "900_
 # is accepted as the title without complaint.
 RAW_TEXT_KEYWORDS = frozenset({"TITLE"})
 
+# Keywords that exist in the manual under a base name but are *templates* —
+# the deck appends a tracer/phase suffix to form the actual keyword name.
+# TVDP is documented as such: real decks write e.g. TVDPFSEA (free tracer
+# SEA), TVDPSIGS (solution tracer IGS), TVDPFWT1 (free tracer WT1).
+TEMPLATE_KEYWORD_NAMES = frozenset({"TVDP"})
+
 
 def _has_variable_arity_item(opm_items: list[dict]) -> bool:
     """
@@ -1319,6 +1325,16 @@ def build_index(manual_dir: Path) -> dict:
         print(f"  SUMMARY    (11.2):  {added} mnemonics added")
     else:
         print(f"  INFO: SUMMARY mnemonics file not found, skipping: {summary_fodt}")
+
+    # Mark known template keywords (TVDP, …) so the diagnostics engine and
+    # docs/hover providers accept ``<base><suffix>`` deck tokens.
+    for name in TEMPLATE_KEYWORD_NAMES:
+        entry = index.get(name)
+        if entry is None:
+            continue
+        targets = entry if isinstance(entry, list) else [entry]
+        for e in targets:
+            e["templated"] = True
 
     print(f"\nIndexed {total} keywords ({skipped} skipped)")
     return index

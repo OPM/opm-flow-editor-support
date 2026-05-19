@@ -1069,6 +1069,23 @@ class TestExtractStringOptions:
 # ---------------------------------------------------------------------------
 
 
+class TestTemplateKeywordPostProcessing:
+    def test_tvdp_marked_as_templated(self, tmp_path):
+        # TVDP exists as a regular keyword .fodt under 10.3, but real decks
+        # write TVDPFSEA / TVDPSIGS / TVDPFWT1 — TVDP itself is a template.
+        # build_index post-processes the index to set templated=True on
+        # TVDP so the diagnostics engine accepts those suffixed tokens.
+        ss = tmp_path / "parts" / "chapters" / "subsections" / "10.3"
+        ss.mkdir(parents=True)
+        (ss / "TVDP.fodt").write_bytes(_make_fodt(
+            _p("Define the Initial Equilibration Tracer Saturation versus Depth Functions. "
+               "The TVDP keyword must be concatenated with the tracer name.")
+        ))
+        from build_keyword_index import build_index
+        idx = build_index(tmp_path)
+        assert idx["TVDP"].get("templated") is True
+
+
 class TestParseSummaryMnemonics:
     def _write_section_fodt(self, tmp_path: Path, body_content: str) -> Path:
         section_dir = tmp_path / "parts" / "chapters" / "sections" / "11"
