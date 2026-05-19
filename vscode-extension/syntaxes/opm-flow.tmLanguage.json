@@ -11,7 +11,8 @@
     { "include": "#variables" },
     { "include": "#defaults" },
     { "include": "#numbers" },
-    { "include": "#terminators" }
+    { "include": "#terminators" },
+    { "include": "#unquoted-strings" }
   ],
   "repository": {
     "comments": {
@@ -28,7 +29,7 @@
     },
     "keywords": {
       "name": "keyword.control.opm-flow",
-      "match": "^[A-Z][A-Z0-9_+-]*\\s*$|^[A-Z][A-Z0-9_+-]*(?=\\s)"
+      "match": "^[A-Z][A-Z0-9_+-]*(?=\\s*(?:--|/|$))"
     },
     "strings": {
       "name": "string.quoted.single.opm-flow",
@@ -56,6 +57,10 @@
         "1": { "name": "punctuation.terminator.opm-flow" },
         "2": { "name": "comment.line.terminator-trailing.opm-flow" }
       }
+    },
+    "unquoted-strings": {
+      "name": "string.unquoted.opm-flow",
+      "match": "(?<![A-Za-z0-9_])[A-Z][A-Z0-9_+-]*(?![A-Za-z0-9_])"
     }
   }
 }
