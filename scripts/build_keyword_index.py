@@ -1021,6 +1021,71 @@ def _summary_size_shape(mnemonic: str) -> tuple[str, Optional[int]]:
     return "fixed", 1
 
 
+def _parse_control_mode_table(rows, section_fodt: Path) -> dict:
+    """
+    Parse a "Field and Group Control Mode Reporting" / "Well Control Mode
+    Reporting" table. These tables are *transposed* compared to the regular
+    mnemonic tables — the mnemonic names live in a single row whose first
+    cell is "Mnemonic", and each mnemonic's description is in the next row
+    (first cell "Description") where description cells may span multiple
+    mnemonic columns.
+    """
+    out: dict = {}
+
+    def _row_starting_with(label: str):
+        for r in rows[1:]:
+            if r and r[0][0].strip() == label:
+                return r
+        return None
+
+    mnem_row = _row_starting_with("Mnemonic")
+    desc_row = _row_starting_with("Description")
+    if not mnem_row:
+        return out
+
+    # Expand the description row into a column-aligned grid so it lines up
+    # with the mnemonic row's own column spans (some tables use span=2 to
+    # share a description across paired Field/Group mnemonics; others use
+    # span=3 to span sub-columns under each mnemonic).
+    desc_grid: list[str] = []
+    if desc_row:
+        for text, span in desc_row[1:]:
+            desc_grid.extend([text.strip()] * span)
+
+    # Walk the mnemonic row, advancing a logical-column cursor by each
+    # cell's span. The description for a mnemonic is the entry at its
+    # *starting* column in the expanded grid.
+    col = 0
+    pairs: list[tuple[str, str]] = []
+    for text, span in mnem_row[1:]:
+        mnemonic = text.strip()
+        if mnemonic:
+            description = desc_grid[col] if col < len(desc_grid) else ""
+            pairs.append((mnemonic, description))
+        col += span
+
+    for mnemonic, description in pairs:
+        if mnemonic in out:
+            continue
+        size_kind, size_count = _summary_size_shape(mnemonic)
+        entry = {
+            "name":        mnemonic,
+            "section":     "SUMMARY",
+            "supported":   None,
+            "summary":     description,
+            "description": description,
+            "parameters":  [],
+            "examples":    [],
+            "full_text":   description,
+            "source_file": str(section_fodt),
+            "size_kind":   size_kind,
+        }
+        if size_count is not None:
+            entry["size_count"] = size_count
+        out[mnemonic] = entry
+    return out
+
+
 def parse_summary_mnemonics(section_fodt: Path) -> dict:
     """
     Extract SUMMARY-section mnemonics from the chapter 11 "Data Requirements"
@@ -1051,6 +1116,16 @@ def parse_summary_mnemonics(section_fodt: Path) -> dict:
         if len(rows) < 3:
             continue
         title = " ".join(t for t, _ in rows[0]).strip()
+
+        # Control Mode Reporting tables (Field/Group, Well) use a different
+        # transposed shape — the mnemonic names live in a single row whose
+        # first cell is "Mnemonic" rather than as scope columns in a header.
+        if "Control Mode Reporting" in title:
+            for name, entry in _parse_control_mode_table(rows, section_fodt).items():
+                if name not in out:
+                    out[name] = entry
+            continue
+
         if not SUMMARY_TABLE_TITLE_RE.search(title):
             continue
 
