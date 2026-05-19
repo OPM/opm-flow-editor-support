@@ -82,8 +82,9 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
   from the reference manual and align the record group to those positions
   (idempotent). For multi-record keywords the names come from the record
   the group belongs to (e.g. `ISEG1`, `ISEG2`, … for a `WELSEGS` segment row).
-- **INCLUDE file navigation** — `Ctrl+click` a quoted path on an `INCLUDE`
-  statement to open the referenced file.
+- **File navigation** — `Ctrl+click` a quoted path on `INCLUDE`, `IMPORT`,
+  `RESTART`, or `GDFILE` statements to open the referenced file. `PATHS`
+  aliases (`$NAME` lookups) are expanded before the file is resolved.
 - **Generate Keyword Reference** — opens a Markdown document listing all
   keywords grouped by section, useful for uploading as AI-chat context.
 

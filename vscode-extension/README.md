@@ -172,12 +172,14 @@ VFPIDIMS
       30     20       20 /
 ```
 
-### INCLUDE File Navigation
+### File Navigation (INCLUDE / IMPORT / RESTART / GDFILE)
 
-Quoted file paths on `INCLUDE` statements become clickable document links. Hold
-`Ctrl` (or `Cmd` on macOS) and click the path — or right-click and choose
-**Go to Definition** — to open the referenced file. Paths are resolved relative
-to the including file's directory.
+Quoted file paths on `INCLUDE`, `IMPORT`, `RESTART`, and `GDFILE` statements
+become clickable document links. Hold `Ctrl` (or `Cmd` on macOS) and click the
+path — or right-click and choose **Go to Definition** — to open the referenced
+file. Paths are resolved relative to the including file's directory, and any
+`PATHS` aliases (`$NAME` lookups) defined in the deck are expanded before the
+file is resolved.
 
 ```
 INCLUDE
@@ -201,6 +203,12 @@ you can override them per-workspace or per-folder.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `opm-flow.diagnostics.excludedKeywords` | `["RPTSCHED"]` | Keywords to skip in every diagnostic check. Names are upper-cased on read; matching is case-insensitive. Add keywords whose record bodies don't fit the generic model and produce noisy false positives. |
+
+### File associations
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `opm-flow.additionalFileExtensions` | `[]` | Extra file extensions (with or without a leading `.`) to open as OPM Flow on top of the built-in list. Useful for project-specific include-file conventions. Matched case-insensitively. Example: `[".myinc", "wellconv"]`. For one-off cases the VS Code-native `files.associations` setting still works too. |
 
 ### Completion
 
@@ -227,13 +235,18 @@ more horizontal room in narrow side panels.
 The extension activates for the following extensions (case-sensitive on some platforms —
 both common casings are registered where relevant):
 
-Core deck files: `.data`, `.DATA`, `.inc`, `.INC`, `.include`, `.sch`, `.SCH`,
-`.schedule`, `.summary`, `.grdecl`, `.GRDECL`, `.vfp`, `.VFP`, `.prop`, `.Ecl`, `.ecl`.
+Core deck files: `.data`, `.DATA`, `.dat`, `.inc`, `.INC`, `.incl`, `.include`,
+`.sch`, `.SCH`, `.sched`, `.schedule`, `.summary`, `.smry`, `.grdecl`, `.GRDECL`,
+`.grid`, `.gridopts`, `.vfp`, `.VFP`, `.vfpprod`, `.prop`, `.prpecl`, `.Ecl`, `.ecl`.
 
 Section data files (Eclipse/OPM include conventions): `.aqucon`, `.aqunum`, `.dimens`,
-`.eqlnum`, `.equil`, `.fault`, `.fipnum`, `.multnum`, `.multregp`, `.multregt`, `.nnc`,
-`.ntg`, `.opernum`, `.perm`, `.poro`, `.pvt`, `.rocknum`, `.satnum`, `.sattab`,
-`.tabdims`, `.thpres`.
+`.eqldims`, `.eqlnum`, `.equil`, `.fault`, `.faults`, `.fipnum`, `.fipzon`, `.multnum`,
+`.multregp`, `.multregt`, `.nnc`, `.ntg`, `.opernum`, `.perm`, `.permx`, `.poro`, `.pvt`,
+`.pvtnum`, `.regdims`, `.rocknum`, `.rxvd`, `.satnum`, `.sattab`, `.swatinit`, `.tabdims`,
+`.thpres`, `.trans`.
+
+For project-specific extensions not covered by this list, set
+`opm-flow.additionalFileExtensions` (see [Settings](#settings)).
 
 ## Language ID
 
@@ -245,6 +258,56 @@ The language is registered as `opm-flow`.
 - Python 3.10+ with `lxml` (only required when regenerating the keyword index)
 
 ## Release Notes
+
+### 0.6.4
+
+- **Issue #13** — Unquoted string values like `YES` under `SCALECRS` or
+  `THPRES` under `EQLOPTS` are no longer mis-classified as keywords. The
+  grammar is anchored to column 1; the analyzer treats indented keyword-
+  shaped tokens inside an open record block as record values; cursor-driven
+  docs/hover require the word to start at column 0 before treating it as a
+  keyword declaration.
+- **Bare uppercase tokens inside records** are now coloured as strings.
+  Well/group/property names like `OP01`, `FIELD`, `UPPER`, `SGL`/`SOWCR` in
+  `EQUALS`/`GRUPTREE`/`WCONHIST` records no longer pick up the keyword colour.
+  The `keywords` rule was tightened to match only when the line is the keyword
+  alone (optionally followed by a `--` comment or a `/`).
+- **Multi-line records no longer false-flag as missing `/`**:
+  - `MESSAGES` 13-INT records split as print-limits then stop-limits.
+  - `VFPPROD` / `VFPINJ` axis (LIQ/THP/WFR/GFR/ALQ) and BHP tables; the block
+    no longer demands a closing standalone `/` either.
+  - `WOPR`, `WGPR` and 976 other non-F SUMMARY mnemonics with names spread
+    across multiple lines.
+- **Bare-stacked SUMMARY mnemonics** like `GMWPR \n GMWIN \n /` are accepted
+  (new `optional_body` shape tagged on 981 non-F mnemonics so empty bodies
+  don't demand a closing `/`; once values are listed the diagnostic still
+  fires).
+- **Keyword recognition** broadened:
+  - SUMMARY-section mnemonics (`FOPR`, `WOPR`, `GGOR`, `GPR`, …).
+  - Templated tracer mnemonics (`FTPRSEA`, `WTITHTO`, …) and TVDP mnemonics
+    (`TVDPFWT1`, `TVDPSIGS`, …) resolved via base-name + suffix lookup.
+  - OPM Flow Performance mnemonics (`TCPUDAY`, `ELAPSED`, …) and Control
+    Mode Reporting mnemonics (`FMCTP`, `WSTAT`, …).
+  - User-defined FIP region keywords (`FIPZON`, `FIPGL`, `FIPNL`, `FIPUNIT`,
+    `FIPHC`, …).
+  - UDQ SUMMARY mnemonics (`WUWI1`, `FUOIL`, `GUTOT`, …) via 2-char scope-
+    prefix templates (`FU`, `WU`, `GU`, `CU`, `RU`, `SU`).
+- **File links** extended from `INCLUDE` only to also cover `IMPORT`,
+  `RESTART`, and `GDFILE`. `PATHS` aliases (`$NAME` lookups) are expanded
+  before resolution.
+- **Variadic-record keyword continuation lines** (`RSVD`, `RVVD`, `PVDO`,
+  `PVTO`) no longer flagged as missing per-record `/`.
+- **`TITLE`** no longer requires a trailing `/`.
+- **Multi-record keywords with integer size** (`TUNING`, `TUNINGL`, `TUNINGS`,
+  `PLYSHLOG`, `PRORDER`, `PYACTION`) are classified as `fixed`, not `list`, so
+  no spurious closing-`/` warning.
+- **17 additional file extensions** registered: `.dat`, `.eqldims`,
+  `.faults`, `.fipzon`, `.grid`, `.gridopts`, `.incl`, `.permx`, `.prpecl`,
+  `.pvtnum`, `.regdims`, `.rxvd`, `.sched`, `.smry`, `.swatinit`, `.trans`,
+  `.vfpprod`.
+- **New `opm-flow.additionalFileExtensions` setting** for project-specific
+  include-file extensions not covered by the built-in list. Resource-scoped so
+  a workspace can pin its own list.
 
 ### 0.6.3
 
