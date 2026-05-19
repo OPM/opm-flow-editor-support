@@ -824,6 +824,49 @@ describe('computeDiagnostics — templated tracer mnemonics', () => {
 // TITLE — free-form text on the next line, no '/' terminator
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Variadic-record keywords — RSVD/RVVD/PVDO/PVTO records span multiple lines
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — variadic-record keywords', () => {
+  // RSVD-shaped fixture: items have size_type=ALL, so each record can
+  // continue across many lines and only the line containing '/' closes it.
+  const variadicIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    RSVD: {
+      name: 'RSVD',
+      sections: ['SOLUTION'],
+      size_kind: 'fixed',
+      variadic_record: true,
+    },
+  };
+
+  it('does not flag intermediate continuation lines as missing a /', () => {
+    // From the user's deck: each record is several data rows ending with
+    // '/'. Pre-fix, every intermediate row was flagged "missing terminating
+    // '/'" because the engine treated each line as its own record.
+    const lines = [
+      'SOLUTION',
+      'RSVD',
+      ' 2650.000 156.324',
+      ' 2660.000 153.000',
+      ' 2670.000 151.000',
+      ' 2680.000 149.000',
+      ' 2690.000 147.000',
+      ' 2700.000 145.000 /',
+      '',
+      ' 2600.000 150.000',
+      ' 2700.000 138.134 /',
+    ];
+    expect(computeDiagnostics(lines, variadicIndex)).toEqual([]);
+  });
+
+  it('still does not flag a record whose only line carries /', () => {
+    const lines = ['SOLUTION', 'RSVD', ' 2650.0 156.3  2700.0 145.0 /'];
+    expect(computeDiagnostics(lines, variadicIndex)).toEqual([]);
+  });
+});
+
 describe('computeDiagnostics — TITLE accepts a bare title line', () => {
   const titleIndex: Record<string, AnalysisEntry> = {
     ...index,
