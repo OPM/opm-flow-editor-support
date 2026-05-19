@@ -1364,6 +1364,38 @@ def build_index(manual_dir: Path) -> dict:
         for e in targets:
             e["templated"] = True
 
+    # UDQ SUMMARY mnemonics are documented under placeholder names of the
+    # form ``<scope-prefix>UX{2,}`` (FUXXXXXX, WUXXXXXX, …) — the trailing
+    # X's stand for the user-defined UDQ name (up to six characters). Real
+    # decks write e.g. ``WUWI1`` or ``FUOIL``. Strip the trailing X's so
+    # the entry is keyed/named by the prefix alone (``WU``, ``FU``, …) and
+    # mark it templated so the standard ``<base>+[A-Z0-9]+`` fallback
+    # resolves deck tokens like WUWI1 to the WU template entry.
+    # Lazy quantifier on the prefix so ``FUXXXXXX`` splits as ("FU", "XXXXXX"),
+    # not ("FUXXXX", "XX"). ``[A-Z]+`` would otherwise consume the X's first.
+    udq_placeholder_re = re.compile(r"^([A-Z]+?)X{2,}$")
+    udq_renames: list[tuple[str, str]] = []
+    for name in list(index.keys()):
+        m = udq_placeholder_re.match(name)
+        if not m:
+            continue
+        prefix = m.group(1)
+        if prefix in index:
+            # Prefix entry already exists from some other path; leave the
+            # placeholder alone rather than risk overwriting real data.
+            continue
+        udq_renames.append((name, prefix))
+    for old_name, new_name in udq_renames:
+        entry = index.pop(old_name)
+        if isinstance(entry, list):
+            for e in entry:
+                e["name"] = new_name
+                e["templated"] = True
+        else:
+            entry["name"] = new_name
+            entry["templated"] = True
+        index[new_name] = entry
+
     print(f"\nIndexed {total} keywords ({skipped} skipped)")
     return index
 
