@@ -652,6 +652,23 @@ class TestLoadOpmCommonIndex:
         idx = load_opm_common_index(tmp_path)
         assert idx == {}
 
+    def test_title_size_kind_overridden_to_none(self, tmp_path):
+        # opm-common describes TITLE as size:1 with a single size_type:ALL
+        # STRING item — the generic classifier would call this fixed/1 and
+        # the diagnostics engine would then demand a trailing '/' that
+        # real decks never write. RAW_TEXT_KEYWORDS forces size_kind=none
+        # so 'TITLE\n   BASE MODEL 1' is accepted as-is.
+        self._write_kw(tmp_path, "000_Eclipse100", "T", "TITLE", {
+            "name": "TITLE",
+            "sections": ["RUNSPEC"],
+            "size": 1,
+            "items": [{"name": "TitleText", "value_type": "STRING",
+                       "size_type": "ALL"}],
+        })
+        idx = load_opm_common_index(tmp_path)
+        assert idx["TITLE"]["size_kind"] == "none"
+        assert idx["TITLE"]["size_count"] is None
+
 
 class TestClassifySize:
     def test_explicit_size_zero_means_none(self):

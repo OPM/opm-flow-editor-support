@@ -37,6 +37,15 @@ from lxml import etree
 
 OPM_COMMON_DIALECTS = ("000_Eclipse100", "001_Eclipse300", "002_Frontsim", "900_OPM")
 
+# Keywords whose "record" is just free-form text on the line after the
+# keyword name, with no '/' terminator. opm-common shapes these as
+# ``size: 1, items: [{ size_type: "ALL", value_type: "STRING" }]``, which
+# the generic classifier reasonably calls "fixed/1" — but that prompts
+# the diagnostics engine to demand a trailing '/' that real decks never
+# write. Override them to ``size_kind: "none"`` so the next-line text
+# is accepted as the title without complaint.
+RAW_TEXT_KEYWORDS = frozenset({"TITLE"})
+
 
 def _has_variable_arity_item(opm_items: list[dict]) -> bool:
     """
@@ -131,6 +140,8 @@ def load_opm_common_index(keywords_dir: Path) -> dict:
                 if name in out:
                     continue
                 size_kind, size_count = _classify_size(data)
+                if name in RAW_TEXT_KEYWORDS:
+                    size_kind, size_count = "none", None
                 out[name] = {
                     "sections":   data.get("sections", []),
                     "items":      data.get("items", []),

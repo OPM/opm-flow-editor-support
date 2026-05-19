@@ -819,3 +819,22 @@ describe('computeDiagnostics — templated tracer mnemonics', () => {
     expect(computeDiagnostics(lines, tracerIndex)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// TITLE — free-form text on the next line, no '/' terminator
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — TITLE accepts a bare title line', () => {
+  const titleIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    TITLE: { name: 'TITLE', sections: ['RUNSPEC'], size_kind: 'none' },
+  };
+
+  it('does not demand a trailing / after the title text', () => {
+    // Real OPM Flow decks write the title as the next line, with no
+    // record terminator. Marking TITLE size_kind='none' suppresses the
+    // missing-/ diagnostic the items-based default would otherwise fire.
+    const lines = ['RUNSPEC', 'TITLE', '   BASE MODEL 1'];
+    expect(computeDiagnostics(lines, titleIndex)).toEqual([]);
+  });
+});
