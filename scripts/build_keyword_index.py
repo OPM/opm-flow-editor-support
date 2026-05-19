@@ -1044,7 +1044,7 @@ def _summary_size_shape(mnemonic: str) -> tuple[str, Optional[int]]:
     Field-scope mnemonics (F-prefix: FOPR, FWPR, …) are written bare with
     no terminating '/' — ``size_kind: 'none'``.
 
-    Every other scope (G/W/C/L/R/B/A/N/S…) takes a single block whose
+    Every other scope (G/W/C/L/R/B/A/N/S…) takes an optional block whose
     payload is a list of names — well, group, region, completion, …
     — spread freely across one or more lines and closed by a single '/':
 
@@ -1053,17 +1053,21 @@ def _summary_size_shape(mnemonic: str) -> tuple[str, Optional[int]]:
           'PROD2'
         /
 
-    ``size_kind: 'array'`` matches that shape: arity and per-line
-    terminator checks are skipped, and the engine only insists on a
-    single closing '/' (either trailing on the last value line or on
-    its own line). 'fixed'/1 was almost right for the common one-line
-    form (``WOPR \\n 'W1' 'W2' /``) but mis-flagged every intermediate
-    line of the multi-line form as missing the terminating '/'. 'list'
-    would similarly mis-demand a per-record '/'.
+    The body is OPTIONAL: ``WOPR \\n GMWIN \\n /`` (two bare mnemonics
+    stacked, single closing '/') is a real and widespread pattern in OPM
+    decks. Callers pair ``size_kind: 'array'`` with ``optional_body =
+    True`` for these entries so the diagnostics engine skips the
+    close-block terminator check when no values were given but still
+    flags a forgotten '/' once names are listed.
     """
     if mnemonic.startswith("F"):
         return "none", None
     return "array", None
+
+
+def _summary_optional_body(mnemonic: str) -> bool:
+    """Whether the SUMMARY mnemonic's record body may be omitted entirely."""
+    return not mnemonic.startswith("F")
 
 
 def _parse_performance_table(rows, section_fodt: Path) -> dict:
@@ -1175,6 +1179,8 @@ def _parse_control_mode_table(rows, section_fodt: Path) -> dict:
         }
         if size_count is not None:
             entry["size_count"] = size_count
+        if _summary_optional_body(mnemonic):
+            entry["optional_body"] = True
         out[mnemonic] = entry
     return out
 
@@ -1278,6 +1284,8 @@ def parse_summary_mnemonics(section_fodt: Path) -> dict:
                 }
                 if size_count is not None:
                     entry["size_count"] = size_count
+                if _summary_optional_body(mnemonic):
+                    entry["optional_body"] = True
                 if is_templated:
                     entry["templated"] = True
                 out[mnemonic] = entry

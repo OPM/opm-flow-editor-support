@@ -909,6 +909,39 @@ describe('computeDiagnostics — SUMMARY mnemonic list bodies', () => {
     const diags = computeDiagnostics(lines, summaryIndex);
     expect(diags.some(d => /WOPR.*missing terminating/.test(d.message))).toBe(true);
   });
+
+  it('accepts back-to-back bare mnemonics closed by one trailing /', () => {
+    // The widely-used GMWPR / GMWIN pattern: stack bare optional-body
+    // mnemonics and close the lot with a single '/'.
+    const optionalIndex: Record<string, AnalysisEntry> = {
+      ...index,
+      GMWPR: { name: 'GMWPR', sections: ['SUMMARY'], size_kind: 'array', optional_body: true },
+      GMWIN: { name: 'GMWIN', sections: ['SUMMARY'], size_kind: 'array', optional_body: true },
+    };
+    const lines = ['SUMMARY', 'GMWPR', 'GMWIN', '/'];
+    expect(computeDiagnostics(lines, optionalIndex)).toEqual([]);
+  });
+
+  it('accepts a single bare optional-body mnemonic with no body and no /', () => {
+    const optionalIndex: Record<string, AnalysisEntry> = {
+      ...index,
+      GMWPR: { name: 'GMWPR', sections: ['SUMMARY'], size_kind: 'array', optional_body: true },
+    };
+    const lines = ['SUMMARY', 'GMWPR'];
+    expect(computeDiagnostics(lines, optionalIndex)).toEqual([]);
+  });
+
+  it('still flags a missing / once values have been listed (optional_body)', () => {
+    // optional_body only relaxes the empty-body case; once names appear
+    // the missing-/ diagnostic must still fire.
+    const optionalIndex: Record<string, AnalysisEntry> = {
+      ...index,
+      GMWPR: { name: 'GMWPR', sections: ['SUMMARY'], size_kind: 'array', optional_body: true },
+    };
+    const lines = ['SUMMARY', 'GMWPR', "  'PROD'"];
+    const diags = computeDiagnostics(lines, optionalIndex);
+    expect(diags.some(d => /GMWPR.*missing terminating/.test(d.message))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
