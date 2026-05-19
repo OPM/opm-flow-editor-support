@@ -1159,6 +1159,49 @@ class TestParseSummaryMnemonics:
         for kw in ("FAPI", "GAPI", "WAPI"):
             assert "templated" not in out[kw]
 
+    def test_picks_up_field_group_control_mode_table(self, tmp_path):
+        # The "Field and Group Control Mode Reporting" table is transposed:
+        # the mnemonic names live in a single row whose first cell is
+        # "Mnemonic" rather than in scope-named columns. Description cells
+        # in the next row span across paired Field/Group columns.
+        title = _row("Field and Group Control Mode Reporting")
+        groups = _row("Object", "Field", "Group", "Field", "Group", "Field", "Group")
+        mnem = _row("Mnemonic", "FMCTP", "GMCTP", "FMCTW", "GMCTW", "FMCTG", "GMCTG")
+        desc = _row("Description", "Production Group.", "Water Injection Group.",
+                    "Gas Injection Group.", spans=[1, 2, 2, 2])
+        body = _table(title, groups, mnem, desc)
+        fodt = self._write_section_fodt(tmp_path, body)
+        out = parse_summary_mnemonics(fodt)
+        for kw in ("FMCTP", "GMCTP", "FMCTW", "GMCTW", "FMCTG", "GMCTG"):
+            assert kw in out
+        # Field-scope stays bare; group-scope takes a single record.
+        assert out["FMCTP"]["size_kind"] == "none"
+        assert out["GMCTP"]["size_kind"] == "fixed"
+        assert out["GMCTP"]["size_count"] == 1
+        # Description spans pair Field/Group correctly.
+        assert "Production Group" in out["FMCTP"]["summary"]
+        assert "Production Group" in out["GMCTP"]["summary"]
+        assert "Water Injection" in out["FMCTW"]["summary"]
+        assert "Gas Injection" in out["FMCTG"]["summary"]
+
+    def test_picks_up_well_control_mode_table(self, tmp_path):
+        # The Well variant uses span=3 on each mnemonic so the descriptions
+        # align with their starting column, not via 1:1 expansion. Real
+        # decks see e.g. WSTAT and WMCTL.
+        title = _row("Well Control Mode Reporting")
+        groups = _row("Object", "Well", "Well", spans=[1, 3, 3])
+        mnem = _row("Mnemonic", "WSTAT", "WMCTL", spans=[1, 3, 3])
+        desc = _row("Description", "Well Status indicator.",
+                    "Well Mode of Control indicator.", spans=[1, 3, 3])
+        body = _table(title, groups, mnem, desc)
+        fodt = self._write_section_fodt(tmp_path, body)
+        out = parse_summary_mnemonics(fodt)
+        assert out["WSTAT"]["size_kind"] == "fixed"
+        assert out["WSTAT"]["size_count"] == 1
+        assert "Well Status" in out["WSTAT"]["summary"]
+        assert "Well Mode of Control" in out["WMCTL"]["summary"]
+        assert out["WMCTL"]["size_kind"] == "fixed"
+
     def test_ignores_tables_without_root_column(self, tmp_path):
         # The performance-counter table has a "Variable Description |
         # Variable | Comment" shape with no "Root" column; it must not
