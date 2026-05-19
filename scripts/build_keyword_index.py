@@ -50,7 +50,10 @@ RAW_TEXT_KEYWORDS = frozenset({"TITLE"})
 # the deck appends a tracer/phase suffix to form the actual keyword name.
 # TVDP is documented as such: real decks write e.g. TVDPFSEA (free tracer
 # SEA), TVDPSIGS (solution tracer IGS), TVDPFWT1 (free tracer WT1).
-TEMPLATE_KEYWORD_NAMES = frozenset({"TVDP"})
+# FIP is similar: the manual states "FIP as the first three characters
+# followed by up to a five letter character string", producing deck tokens
+# like FIPZON, FIPGL, FIPNL, FIPUNIT, FIPHC, ….
+TEMPLATE_KEYWORD_NAMES = frozenset({"TVDP", "FIP"})
 
 
 def _has_variable_arity_item(opm_items: list[dict]) -> bool:
