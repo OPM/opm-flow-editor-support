@@ -54,6 +54,13 @@ export interface AnalysisEntry {
    * suffix is ``[A-Z0-9]+`` as recognised, with this entry's shape.
    */
   templated?: boolean;
+  /**
+   * True when at least one item has ``size_type: "ALL"`` (RSVD, RVVD,
+   * PVDO, PVTO, …). Records can span multiple lines and only the line
+   * carrying '/' completes a record; intermediate lines without '/'
+   * must not trigger a missing-terminator diagnostic.
+   */
+  variadic_record?: boolean;
 }
 
 export type AnalysisIndex = Record<string, AnalysisEntry>;
@@ -391,9 +398,12 @@ export function computeDiagnostics(
 
     // Missing record terminator: only flag when we know the keyword takes
     // records (size_kind of 'fixed' or 'list'). If size_kind is unknown we
-    // stay quiet rather than risk false positives.
+    // stay quiet rather than risk false positives. Variadic-record keywords
+    // (RSVD, RVVD, PVDO, …) are also exempt — their records span multiple
+    // lines, and only the line carrying '/' completes the record.
     if (
       !hasTerm &&
+      !activeKw.variadic_record &&
       (activeKw.size_kind === 'fixed' || activeKw.size_kind === 'list')
     ) {
       out.push({

@@ -354,6 +354,14 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
         if opm["items"] and not _has_variable_arity_item(opm["items"]):
             for e in entries:
                 e["expected_columns"] = len(opm["items"])
+        elif opm["items"] and _has_variable_arity_item(opm["items"]):
+            # Items with size_type="ALL" consume all remaining values on the
+            # record. Real decks split such records across many lines (RSVD,
+            # RVVD, PVDO, PVTO, …) and only the line containing '/' closes
+            # the record. Flag this so the diagnostics engine doesn't
+            # complain about every intermediate line missing a terminator.
+            for e in entries:
+                e["variadic_record"] = True
 
         primary = entries[0]
         manual_params = primary.get("parameters", [])
@@ -1380,6 +1388,8 @@ def write_compact_json(index: dict, output_path: Path):
             out_entry["size_count"] = size_count
         if primary.get("templated"):
             out_entry["templated"] = True
+        if primary.get("variadic_record"):
+            out_entry["variadic_record"] = True
         compact[name] = out_entry
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(compact, f, separators=(",", ":"), ensure_ascii=False)

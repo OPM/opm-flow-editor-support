@@ -811,6 +811,29 @@ class TestMergeOpmCommon:
         merge_opm_common(index, opm)
         assert "expected_columns" not in index["RSVD"]
 
+    def test_variadic_record_flag_set_for_all_items(self):
+        # RSVD/RVVD/PVDO/PVTO records have items with size_type=ALL and
+        # span multiple lines; only the line carrying '/' completes the
+        # record. The diagnostics engine reads variadic_record to skip
+        # the missing-'/' check on continuation lines.
+        index = {"RSVD": self._manual_entry(sections=("SOLUTION",))}
+        opm = {"RSVD": {
+            "sections": ["SOLUTION"],
+            "items": [{"name": "DATA", "size_type": "ALL"}],
+        }}
+        merge_opm_common(index, opm)
+        assert index["RSVD"].get("variadic_record") is True
+
+    def test_variadic_record_flag_not_set_for_fixed_items(self):
+        # ACTDIMS-shaped: no size_type=ALL item — variadic_record stays unset.
+        index = {"ACTDIMS": self._manual_entry()}
+        opm = {"ACTDIMS": {
+            "sections": ["RUNSPEC"],
+            "items": [{"name": "A"}, {"name": "B"}],
+        }}
+        merge_opm_common(index, opm)
+        assert "variadic_record" not in index["ACTDIMS"]
+
     def test_missing_manual_items_are_backfilled_from_opm_common(self):
         # COMPDAT-shaped: opm-common has 14 items but the manual only documents 13.
         # The 14th must be appended so column-header generation and hovers
