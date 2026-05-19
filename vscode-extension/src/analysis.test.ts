@@ -874,6 +874,44 @@ describe('computeDiagnostics — templated FIP region keywords', () => {
 });
 
 // ---------------------------------------------------------------------------
+// SUMMARY mnemonic body — list of names spread across multiple lines
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — SUMMARY mnemonic list bodies', () => {
+  // W/G/C/L/R/B/A/N/S-prefixed SUMMARY mnemonics take a list of names
+  // closed by a single '/'. The names can sit on one line or be spread
+  // across many; only the closing '/' completes the block. Modelled as
+  // `size_kind: 'array'` so per-line missing-'/' checks are suppressed
+  // but a missing block-end '/' is still flagged.
+  const summaryIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    WOPR: { name: 'WOPR', sections: ['SUMMARY'], size_kind: 'array' },
+  };
+
+  it('accepts names spread across multiple lines with a closing /', () => {
+    // The exact case from the user's report.
+    const lines = ['SUMMARY', 'WOPR', "  'PROD'", '/'];
+    expect(computeDiagnostics(lines, summaryIndex)).toEqual([]);
+  });
+
+  it('accepts the inline form with a trailing /', () => {
+    const lines = ['SUMMARY', 'WOPR', "  'PROD1' 'PROD2' /"];
+    expect(computeDiagnostics(lines, summaryIndex)).toEqual([]);
+  });
+
+  it('accepts a bare / meaning "all wells"', () => {
+    const lines = ['SUMMARY', 'WOPR', '/'];
+    expect(computeDiagnostics(lines, summaryIndex)).toEqual([]);
+  });
+
+  it('still flags a block with no terminating /', () => {
+    const lines = ['SUMMARY', 'WOPR', "  'PROD'"];
+    const diags = computeDiagnostics(lines, summaryIndex);
+    expect(diags.some(d => /WOPR.*missing terminating/.test(d.message))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TITLE — free-form text on the next line, no '/' terminator
 // ---------------------------------------------------------------------------
 
