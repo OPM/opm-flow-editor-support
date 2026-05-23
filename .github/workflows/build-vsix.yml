@@ -8,17 +8,21 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Default least-privilege token scope; jobs that need more elevate explicitly.
+permissions:
+  contents: read
+
 jobs:
   build-index:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (with submodule)
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
         with:
           submodules: recursive
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
         with:
           python-version: '3.12'
           cache: pip
@@ -39,7 +43,7 @@ jobs:
             --compact vscode-extension/data/keyword_index_compact.json
 
       - name: Upload keyword index
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: keyword-index
           path: vscode-extension/data/keyword_index_compact.json
@@ -56,17 +60,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: vscode-extension/package-lock.json
 
       - name: Download freshly built keyword index
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: keyword-index
           path: vscode-extension/data
@@ -81,10 +85,10 @@ jobs:
         run: npm run compile
 
       - name: Package VSIX
-        run: npx --yes @vscode/vsce package
+        run: npx --yes @vscode/vsce@3.9.1 package
 
       - name: Upload VSIX artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: opm-flow-editor-support-vsix
           path: vscode-extension/opm-flow-editor-support-*.vsix
@@ -92,7 +96,7 @@ jobs:
 
       - name: Attach VSIX to release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3
         with:
           files: vscode-extension/opm-flow-editor-support-*.vsix
 
@@ -102,12 +106,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6
         with:
           node-version: '24'
 
       - name: Download VSIX
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: opm-flow-editor-support-vsix
           path: .
@@ -115,7 +119,7 @@ jobs:
       - name: Publish to VS Code Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx --yes @vscode/vsce publish --packagePath opm-flow-editor-support-*.vsix --pat "$VSCE_PAT"
+        run: npx --yes @vscode/vsce@3.9.1 publish --packagePath opm-flow-editor-support-*.vsix --pat "$VSCE_PAT"
 
   # Disabled until Open VSX account + OVSX_PAT secret are set up.
   # To re-enable: change `if: false` back to `if: startsWith(github.ref, 'refs/tags/v')`.
@@ -125,12 +129,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6
         with:
           node-version: '24'
 
       - name: Download VSIX
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: opm-flow-editor-support-vsix
           path: .
@@ -138,4 +142,4 @@ jobs:
       - name: Publish to Open VSX
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx --yes ovsx publish opm-flow-editor-support-*.vsix -p "$OVSX_PAT"
+        run: npx --yes ovsx@0.10.12 publish opm-flow-editor-support-*.vsix -p "$OVSX_PAT"
