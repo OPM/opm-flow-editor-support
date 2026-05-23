@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # VS Code extension JavaScript/TypeScript toolchain.
+  - package-ecosystem: npm
+    directory: /vscode-extension
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+
+  # Python build-time deps used by the keyword-index generator.
+  - package-ecosystem: pip
+    directory: /scripts
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
+  # CI actions — keep SHA pins fresh as upstream tags advance.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

@@ -200,7 +200,12 @@ function resolveKeyword(index: KeywordIndex, kw: string): KeywordEntry | undefin
 // ---------------------------------------------------------------------------
 
 function escHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function paramTypeLabel(p: Parameter): string {
@@ -327,7 +332,7 @@ function buildDocsHtml(
         ? ' class="highlight"' : '';
       const dataRecord = p.record !== undefined
         ? ` data-record="${escHtml(String(p.record))}"` : '';
-      return `<tr data-param-index="${escHtml(String(p.index))}"${dataRecord}${hl}><td>${p.index}</td><td class="name"><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${typeCell}${unitCells}${defaultCell}</tr>`;
+      return `<tr data-param-index="${escHtml(String(p.index))}"${dataRecord}${hl}><td>${escHtml(String(p.index))}</td><td class="name"><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${typeCell}${unitCells}${defaultCell}</tr>`;
     };
 
     const tableHead = `<thead><tr><th>No.</th><th class="name">Name</th><th>Description</th>${typeCol}${unitCols}${defaultCol}</tr></thead>`;
@@ -422,7 +427,10 @@ class DocsViewProvider implements vscode.WebviewViewProvider {
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this._view = view;
-    view.webview.options = { enableScripts: true };
+    // The docs panel renders only inline HTML/CSS/JS that we build here, so
+    // it never needs to load files from disk. Drop `localResourceRoots` to
+    // an empty list to deny the webview any filesystem access.
+    view.webview.options = { enableScripts: true, localResourceRoots: [] };
     view.webview.html = buildDocsHtml(null, null, getDocColumns());
     this._currentEntry = undefined;
     this._currentParam = undefined;
@@ -469,7 +477,9 @@ function buildKeywordHover(
   isExcluded?: boolean,
 ): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
-  md.isTrusted = true;
+  // `supportHtml` is enough for the inline <span style="..."> notices below.
+  // `isTrusted` would additionally permit `command:` links to execute, which
+  // these hovers never use — keep it off as defense in depth.
   md.supportHtml = true;
 
   if (
@@ -499,7 +509,7 @@ function buildKeywordHover(
 
 function buildParameterHover(entry: KeywordEntry, param: Parameter): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
-  md.isTrusted = true;
+  // No HTML or command links needed here — pure markdown is sufficient.
   md.appendMarkdown(`**\`${entry.name}\` — parameter ${param.index}: \`${param.name}\`**\n\n`);
   md.appendMarkdown(`${param.description}\n\n`);
   const cols = getDocColumns();
