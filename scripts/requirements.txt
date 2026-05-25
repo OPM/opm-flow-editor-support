@@ -1,2 +1,2 @@
 lxml>=4.9
-pytest>=7.0
+pytest>=9.0.3
