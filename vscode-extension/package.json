@@ -234,10 +234,10 @@
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
-    "@types/node": "18.x",
-    "@types/vscode": "^1.74.0",
-    "jest": "^30.3.0",
-    "ts-jest": "^29.4.9",
-    "typescript": "^5.0.0"
+    "@types/node": "25.x",
+    "@types/vscode": "^1.120.0",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.11",
+    "typescript": "^6.0.3"
   }
 }
