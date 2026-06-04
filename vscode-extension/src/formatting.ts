@@ -179,6 +179,35 @@ export function isCommentLine(line: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Line-comment toggle
+// ---------------------------------------------------------------------------
+
+/** A line is treated as commented for toggle purposes only when the comment
+ *  marker sits at the *absolute* start of the line (column 0). An indented
+ *  `--` is left alone so the toggle round-trips cleanly. */
+const LEADING_COMMENT_RE = /^--[ \t]?/;
+
+/**
+ * Toggle `--` line comments at the absolute beginning of each given line.
+ *
+ * Mirrors the editor's "toggle line comment" convention: if every non-blank
+ * line already starts with `--`, all of them are uncommented; otherwise every
+ * non-blank line is commented by prefixing `-- ` at column 0. Blank lines are
+ * left untouched. Returns the rewritten lines, or `null` when there is nothing
+ * to toggle (no non-blank lines).
+ */
+export function toggleLineComments(lines: string[]): string[] | null {
+  const nonBlank = lines.filter(l => l.trim() !== '');
+  if (nonBlank.length === 0) return null;
+  const allCommented = nonBlank.every(l => l.startsWith('--'));
+  return lines.map(l => {
+    if (l.trim() === '') return l;
+    if (allCommented) return l.replace(LEADING_COMMENT_RE, '');
+    return `-- ${l}`;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Column alignment helpers
 // ---------------------------------------------------------------------------
 

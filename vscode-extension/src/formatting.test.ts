@@ -9,6 +9,7 @@ import {
   formatRecordGroupWithHeading,
   buildHeadingAndAlignedRecords,
   tokenColumnCount,
+  toggleLineComments,
   RecordLine,
 } from './formatting';
 
@@ -697,5 +698,60 @@ describe('columnForCompletion', () => {
 
   test('empty line returns column 1', () => {
     expect(columnForCompletion('', 0)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toggleLineComments
+// ---------------------------------------------------------------------------
+
+describe('toggleLineComments', () => {
+  test('comments uncommented lines at column 0', () => {
+    expect(toggleLineComments(['WCONPROD', '  PROD OPEN'])).toEqual([
+      '-- WCONPROD',
+      '--   PROD OPEN',
+    ]);
+  });
+
+  test('uncomments when every non-blank line is commented', () => {
+    expect(toggleLineComments(['-- WCONPROD', '--   PROD OPEN'])).toEqual([
+      'WCONPROD',
+      '  PROD OPEN',
+    ]);
+  });
+
+  test('removes only one space after the marker on uncomment', () => {
+    expect(toggleLineComments(['--  double space'])).toEqual([' double space']);
+    expect(toggleLineComments(['--no space'])).toEqual(['no space']);
+  });
+
+  test('comments all when the block is only partially commented', () => {
+    expect(toggleLineComments(['-- already', 'not yet'])).toEqual([
+      '-- -- already',
+      '-- not yet',
+    ]);
+  });
+
+  test('leaves blank lines untouched and ignores them in the decision', () => {
+    expect(toggleLineComments(['-- one', '', '-- two'])).toEqual([
+      'one',
+      '',
+      'two',
+    ]);
+  });
+
+  test('an indented marker is not treated as commented', () => {
+    expect(toggleLineComments(['  -- indented'])).toEqual(['--   -- indented']);
+  });
+
+  test('round-trips comment then uncomment', () => {
+    const original = ['RUNSPEC', '  DIMENS', '  10 10 3 /'];
+    const commented = toggleLineComments(original)!;
+    expect(toggleLineComments(commented)).toEqual(original);
+  });
+
+  test('returns null when there is nothing to toggle', () => {
+    expect(toggleLineComments([])).toBeNull();
+    expect(toggleLineComments(['', '   '])).toBeNull();
   });
 });
