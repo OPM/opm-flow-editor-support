@@ -172,6 +172,22 @@ VFPIDIMS
       30     20       20 /
 ```
 
+### Toggle Line Comment
+
+Select one or more lines and invoke **OPM Flow: Toggle Line Comment** (bound to
+`Ctrl+/`, or `Cmd+/` on macOS — VS Code maps this to the same physical key as the
+built-in comment toggle, so it follows your keyboard layout) — also available from
+the right-click menu — to
+add or remove a `--` comment marker at the very start of each selected line. If
+every non-blank line in the selection is already commented the marker is
+removed; otherwise `-- ` is inserted at column 0 of each line. Blank lines are
+left untouched.
+
+```
+-- WCONPROD
+--   'PROD' 'OPEN' /
+```
+
 ### File Navigation (INCLUDE / IMPORT / RESTART / GDFILE)
 
 Quoted file paths on `INCLUDE`, `IMPORT`, `RESTART`, and `GDFILE` statements

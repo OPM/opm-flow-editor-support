@@ -130,6 +130,10 @@
       {
         "command": "opm-flow.addColumnHeaders",
         "title": "OPM Flow: Add Column Headers"
+      },
+      {
+        "command": "opm-flow.toggleLineComment",
+        "title": "OPM Flow: Toggle Line Comment"
       }
     ],
     "menus": {
@@ -143,9 +147,22 @@
           "command": "opm-flow.addColumnHeaders",
           "when": "resourceLangId == opm-flow",
           "group": "opm-flow"
+        },
+        {
+          "command": "opm-flow.toggleLineComment",
+          "when": "resourceLangId == opm-flow",
+          "group": "opm-flow"
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "opm-flow.toggleLineComment",
+        "key": "ctrl+/",
+        "mac": "cmd+/",
+        "when": "editorTextFocus && !editorReadonly && editorLangId == opm-flow"
+      }
+    ],
     "configuration": {
       "title": "OPM Flow",
       "properties": {

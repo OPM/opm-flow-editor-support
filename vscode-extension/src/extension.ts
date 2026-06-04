@@ -17,6 +17,7 @@ import {
   formatRecordGroupWithHeading,
   buildHeadingAndAlignedRecords,
   tokenColumnCount,
+  toggleLineComments,
 } from './formatting';
 import { computeDiagnostics } from './analysis';
 import { findFileReferences } from './links';
@@ -1170,6 +1171,37 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
 
+  // --- Command: toggle line comment (`--` at the absolute start of line) ---
+  const toggleCommentCommand = vscode.commands.registerCommand('opm-flow.toggleLineComment', async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+    const doc = editor.document;
+
+    // Toggle every line touched by any selection (deduplicated). A decision
+    // (comment vs. uncomment) is made independently per contiguous selection
+    // so each behaves like the editor's native toggle.
+    await editor.edit(b => {
+      for (const sel of editor.selections) {
+        const firstLine = sel.start.line;
+        // An empty trailing line in the selection (cursor at column 0 of the
+        // line after the last selected character) should not be included.
+        const lastLine = sel.end.line > sel.start.line && sel.end.character === 0
+          ? sel.end.line - 1
+          : sel.end.line;
+        const originals: string[] = [];
+        for (let ln = firstLine; ln <= lastLine; ln++) {
+          originals.push(doc.lineAt(ln).text);
+        }
+        const toggled = toggleLineComments(originals);
+        if (!toggled) continue;
+        for (let k = 0; k < toggled.length; k++) {
+          if (toggled[k] === originals[k]) continue;
+          b.replace(doc.lineAt(firstLine + k).range, toggled[k]);
+        }
+      }
+    });
+  });
+
   const alignColumnsCommand = vscode.commands.registerCommand('opm-flow.alignRecordColumns', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
@@ -1215,7 +1247,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  context.subscriptions.push(completionProvider, valueCompletionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, fileLinkProvider, foldingProvider);
+  context.subscriptions.push(completionProvider, valueCompletionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, toggleCommentCommand, fileLinkProvider, foldingProvider);
 }
 
 export function deactivate(): void {}
