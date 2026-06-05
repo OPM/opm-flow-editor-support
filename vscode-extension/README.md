@@ -275,6 +275,18 @@ The language is registered as `opm-flow`.
 
 ## Release Notes
 
+### 0.7.1
+
+- **Toggle line comment** (Issue #27) — comment/uncomment the current line or
+  selection with the standard editor shortcut, using OPM Flow's `--` comment
+  syntax.
+- **Refreshed keyword data** — the bundled OPM Flow reference manual and
+  `opm-common` keyword definitions were updated to their latest upstream
+  revisions, broadening keyword coverage, section validity, and per-parameter
+  value-type/dimension information surfaced in hover and the docs sidebar.
+- **Security hardening** — CI workflow permissions and action pinning, plus
+  webview/hover and policy hardening.
+
 ### 0.6.4
 
 - **Issue #13** — Unquoted string values like `YES` under `SCALECRS` or
