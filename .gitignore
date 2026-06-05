@@ -11,8 +11,8 @@ venv/
 
 # Keyword-index intermediate artifacts (only the compact JSON under
 # vscode-extension/data is committed)
-/keyword_index.json
-/keyword_summary.tsv
+keyword_index.json
+keyword_summary.tsv
 
 # Editor / OS
 .vscode/

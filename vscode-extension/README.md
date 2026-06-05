@@ -4,7 +4,7 @@ Language support for [OPM Flow](https://opm-project.org/) reservoir simulation d
 with syntax highlighting and development features backed by the full OPM Flow reference manual.
 
 <!-- manual-ref:start -->
-Keyword data is built from [OPM/opm-reference-manual](https://github.com/OPM/opm-reference-manual) at commit [`85395fc0`](https://github.com/OPM/opm-reference-manual/commit/85395fc009a70d96019535bf15318150e48b090d).
+Keyword data is built from [OPM/opm-reference-manual](https://github.com/OPM/opm-reference-manual) at commit [`9baa939b`](https://github.com/OPM/opm-reference-manual/commit/9baa939bff52bc55218adff79b9f8c806fb680dd).
 <!-- manual-ref:end -->
 
 ## Features
