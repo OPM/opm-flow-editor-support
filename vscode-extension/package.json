@@ -188,6 +188,17 @@
     "configuration": {
       "title": "OPM Flow",
       "properties": {
+        "opm-flow.docs.layout": {
+          "type": "string",
+          "enum": ["embedded", "columns"],
+          "enumDescriptions": [
+            "Fold the Type, unit, and Default values into a compact sub-line beneath each parameter description. Gives the Description column much more width — easier to read for keywords with many parameters (e.g. WECON).",
+            "Render Type, units, and Default as separate table columns (the original layout)."
+          ],
+          "default": "embedded",
+          "description": "How the keyword docs sidebar and hover tooltips lay out parameter metadata. The Type / unit / Default show-hide settings still control which values appear in either layout.",
+          "scope": "resource"
+        },
         "opm-flow.columns.showType": {
           "type": "boolean",
           "default": true,

@@ -234,18 +234,70 @@ interface DocColumns {
   metric: boolean;
   lab: boolean;
   default: boolean;
+  /**
+   * 'columns'  — render Type / units / Default as separate table columns
+   *              (the original layout).
+   * 'embedded' — fold that metadata into a muted sub-line under each
+   *              description, giving the Description far more width. The
+   *              same show/hide flags still control which bits appear.
+   */
+  layout: 'columns' | 'embedded';
 }
 
 function getDocColumns(): DocColumns {
   const u = vscode.workspace.getConfiguration('opm-flow.units');
   const c = vscode.workspace.getConfiguration('opm-flow.columns');
+  const d = vscode.workspace.getConfiguration('opm-flow.docs');
   return {
     type:    c.get<boolean>('showType', true),
     field:   u.get<boolean>('showField', true),
     metric:  u.get<boolean>('showMetric', true),
     lab:     u.get<boolean>('showLab', true),
     default: c.get<boolean>('showDefault', true),
+    layout:  d.get<'columns' | 'embedded'>('layout', 'embedded'),
   };
+}
+
+/**
+ * Build the metadata bits (type, units, default) for a parameter, honouring
+ * the column show/hide flags and skipping anything the parameter doesn't
+ * carry. Shared shape for both the sidebar (HTML) and the hover (markdown);
+ * callers supply the per-bit renderers.
+ */
+function metaBits(
+  p: Parameter,
+  typeLabel: string,
+  cols: DocColumns,
+  fmt: { type: (s: string) => string; pair: (label: string, value: string) => string },
+): string[] {
+  const bits: string[] = [];
+  if (cols.type && typeLabel) bits.push(fmt.type(typeLabel));
+  const u = p.units ?? {};
+  if (cols.field  && u.field)      bits.push(fmt.pair('Field',  u.field));
+  if (cols.metric && u.metric)     bits.push(fmt.pair('Metric', u.metric));
+  if (cols.lab    && u.laboratory) bits.push(fmt.pair('Lab',    u.laboratory));
+  if (cols.default && p.default)   bits.push(fmt.pair('default', p.default));
+  return bits;
+}
+
+/** Embedded metadata sub-line for the sidebar (HTML). Empty string when no
+ *  bits are visible. */
+function buildMetaHtml(p: Parameter, typeLabel: string, cols: DocColumns): string {
+  const bits = metaBits(p, typeLabel, cols, {
+    type: t => `<span class="meta-type">${escWithBreaks(t)}</span>`,
+    pair: (label, value) => `<span class="meta-key">${label}:</span> ${escWithBreaks(value)}`,
+  });
+  return bits.length ? `<div class="meta">${bits.join(' <span class="meta-sep">&middot;</span> ')}</div>` : '';
+}
+
+/** Embedded metadata sub-line for the hover (markdown). Empty string when no
+ *  bits are visible. */
+function buildMetaMarkdown(p: Parameter, typeLabel: string, cols: DocColumns): string {
+  const bits = metaBits(p, typeLabel, cols, {
+    type: t => t,
+    pair: (label, value) => `${label}: ${value}`,
+  });
+  return bits.length ? `_${bits.join(' · ')}_` : '';
 }
 
 function buildDocsHtml(
@@ -295,6 +347,14 @@ function buildDocsHtml(
     }
     .placeholder { color: var(--vscode-descriptionForeground); font-style: italic; margin-top: 20px; }
     .sections { color: var(--vscode-descriptionForeground); font-size: 0.9em; margin: 0 0 8px 0; }
+    .meta {
+      color: var(--vscode-descriptionForeground);
+      font-size: 0.92em;
+      margin-top: 3px;
+    }
+    .meta-type { font-style: italic; }
+    .meta-key { opacity: 0.8; }
+    .meta-sep { opacity: 0.5; padding: 0 2px; }
   `;
 
   if (!entry) {
@@ -310,6 +370,7 @@ function buildDocsHtml(
 
   let paramsHtml = '';
   if (allParams.length > 0) {
+    const embedded = cols.layout === 'embedded';
     const showField   = cols.field   && allParams.some(p => p.units?.field);
     const showMetric  = cols.metric  && allParams.some(p => p.units?.metric);
     const showLab     = cols.lab     && allParams.some(p => p.units?.laboratory);
@@ -323,6 +384,20 @@ function buildDocsHtml(
     const defaultCol = showDefault ? '<th>Default</th>' : '';
 
     const renderRow = (p: Parameter, idx: number): string => {
+      const sameRecord  = (highlightParam?.record ?? 1) === (p.record ?? 1);
+      const hl = highlightParam && highlightParam.index === p.index && sameRecord
+        ? ' class="highlight"' : '';
+      const dataRecord = p.record !== undefined
+        ? ` data-record="${escHtml(String(p.record))}"` : '';
+      const head = `<tr data-param-index="${escHtml(String(p.index))}"${dataRecord}${hl}>`
+        + `<td>${escHtml(String(p.index))}</td>`
+        + `<td class="name"><code>${escHtml(p.name)}</code></td>`;
+
+      if (embedded) {
+        const descCell = `<td>${escHtml(p.description)}${buildMetaHtml(p, paramTypes[idx], cols)}</td>`;
+        return `${head}${descCell}</tr>`;
+      }
+
       const u = p.units ?? {};
       const unitCells =
         (showField  ? `<td>${escWithBreaks(u.field ?? '')}</td>`      : '') +
@@ -330,15 +405,12 @@ function buildDocsHtml(
         (showLab    ? `<td>${escWithBreaks(u.laboratory ?? '')}</td>` : '');
       const typeCell    = showType    ? `<td>${escWithBreaks(paramTypes[idx])}</td>` : '';
       const defaultCell = showDefault ? `<td>${escHtml(p.default)}</td>`              : '';
-      const sameRecord  = (highlightParam?.record ?? 1) === (p.record ?? 1);
-      const hl = highlightParam && highlightParam.index === p.index && sameRecord
-        ? ' class="highlight"' : '';
-      const dataRecord = p.record !== undefined
-        ? ` data-record="${escHtml(String(p.record))}"` : '';
-      return `<tr data-param-index="${escHtml(String(p.index))}"${dataRecord}${hl}><td>${escHtml(String(p.index))}</td><td class="name"><code>${escHtml(p.name)}</code></td><td>${escHtml(p.description)}</td>${typeCell}${unitCells}${defaultCell}</tr>`;
+      return `${head}<td>${escHtml(p.description)}</td>${typeCell}${unitCells}${defaultCell}</tr>`;
     };
 
-    const tableHead = `<thead><tr><th>No.</th><th class="name">Name</th><th>Description</th>${typeCol}${unitCols}${defaultCol}</tr></thead>`;
+    const tableHead = embedded
+      ? `<thead><tr><th>No.</th><th class="name">Name</th><th>Description</th></tr></thead>`
+      : `<thead><tr><th>No.</th><th class="name">Name</th><th>Description</th>${typeCol}${unitCols}${defaultCol}</tr></thead>`;
 
     if (entry.records_meta?.length) {
       // Multi-record: render one table per record so the user can see
@@ -543,6 +615,20 @@ function appendParameterTable(
 ): void {
   if (!parameters || parameters.length === 0) return;
   const types = parameters.map(paramTypeLabel);
+
+  if (cols.layout === 'embedded') {
+    // Fold Type / units / Default into a muted sub-line beneath each
+    // description so the Description column isn't squeezed.
+    md.appendMarkdown(`**Parameters**\n\n| No. | Name | Description |\n|-----|------|-------------|\n`);
+    parameters.forEach((p, i) => {
+      const meta = buildMetaMarkdown(p, types[i], cols);
+      const desc = meta ? `${p.description}<br>${meta}` : p.description;
+      md.appendMarkdown(`| ${p.index} | \`${p.name}\` | ${desc} |\n`);
+    });
+    md.appendMarkdown('\n');
+    return;
+  }
+
   const showField   = cols.field   && parameters.some(p => p.units?.field);
   const showMetric  = cols.metric  && parameters.some(p => p.units?.metric);
   const showLab     = cols.lab     && parameters.some(p => p.units?.laboratory);
@@ -986,7 +1072,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration(e => {
       if (
         e.affectsConfiguration('opm-flow.units') ||
-        e.affectsConfiguration('opm-flow.columns')
+        e.affectsConfiguration('opm-flow.columns') ||
+        e.affectsConfiguration('opm-flow.docs')
       ) {
         docsProvider.refresh();
       }
