@@ -21,7 +21,7 @@ import {
 } from './formatting';
 import { computeDiagnostics } from './analysis';
 import { findFileReferences } from './links';
-import { parsePathsAliases, resolvePathAlias } from './paths';
+import { parsePathsAliases, resolvePathAlias, prtCandidatePaths } from './paths';
 import { DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
 
 interface Parameter {
@@ -1220,6 +1220,32 @@ export function activate(context: vscode.ExtensionContext): void {
     await editor.edit(b => { for (const e of edits) b.replace(e.range, e.newText); });
   });
 
+  // --- Command: open the corresponding .PRT print file ---
+  const openPrtCommand = vscode.commands.registerCommand(
+    'opm-flow.openPrtFile',
+    async (resource?: vscode.Uri) => {
+      // Invoked from the editor context menu with the resource URI; from the
+      // command palette with no argument — fall back to the active editor.
+      const target = resource ?? vscode.window.activeTextEditor?.document.uri;
+      if (!target || target.scheme !== 'file') {
+        vscode.window.showInformationMessage(
+          'OPM Flow: open a .DATA file to view its .PRT output.',
+        );
+        return;
+      }
+      const found = prtCandidatePaths(target.fsPath).find(p => fs.existsSync(p));
+      if (!found) {
+        const base = path.basename(target.fsPath, path.extname(target.fsPath));
+        vscode.window.showInformationMessage(
+          `OPM Flow: no ${base}.PRT file found next to ${path.basename(target.fsPath)}. Run the deck first.`,
+        );
+        return;
+      }
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(found));
+      await vscode.window.showTextDocument(doc, { preview: false });
+    },
+  );
+
   // --- File-reference link provider (INCLUDE / IMPORT / RESTART / GDFILE) ---
   const fileLinkProvider = vscode.languages.registerDocumentLinkProvider(
     'opm-flow',
@@ -1253,7 +1279,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  context.subscriptions.push(completionProvider, valueCompletionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, toggleCommentCommand, fileLinkProvider, foldingProvider);
+  context.subscriptions.push(completionProvider, valueCompletionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, toggleCommentCommand, openPrtCommand, fileLinkProvider, foldingProvider);
 }
 
 export function deactivate(): void {}

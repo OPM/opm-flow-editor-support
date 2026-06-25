@@ -1,4 +1,5 @@
-import { parsePathsAliases, resolvePathAlias } from './paths';
+import * as path from 'path';
+import { parsePathsAliases, resolvePathAlias, prtCandidatePaths } from './paths';
 
 // ---------------------------------------------------------------------------
 // parsePathsAliases
@@ -102,6 +103,40 @@ describe('resolvePathAlias', () => {
   it('only substitutes the prefix — embedded $ later in the path is left alone', () => {
     const aliases = new Map([['A', 'expA']]);
     expect(resolvePathAlias('foo/$A/bar', aliases)).toBe('foo/$A/bar');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// prtCandidatePaths
+// ---------------------------------------------------------------------------
+
+describe('prtCandidatePaths', () => {
+  it('offers the uppercase .PRT first, then the lowercase fallback', () => {
+    const deck = path.join('proj', 'CASE.DATA');
+    expect(prtCandidatePaths(deck)).toEqual([
+      path.join('proj', 'CASE.PRT'),
+      path.join('proj', 'CASE.prt'),
+    ]);
+  });
+
+  it('preserves the basename casing and the directory', () => {
+    const deck = path.join('a', 'b', 'NoRnE_2020.DATA');
+    expect(prtCandidatePaths(deck)).toEqual([
+      path.join('a', 'b', 'NoRnE_2020.PRT'),
+      path.join('a', 'b', 'NoRnE_2020.prt'),
+    ]);
+  });
+
+  it('works for a lowercase .data deck extension', () => {
+    expect(prtCandidatePaths('case.data')).toEqual(['case.PRT', 'case.prt']);
+  });
+
+  it('handles a deck path with no extension', () => {
+    expect(prtCandidatePaths('CASE')).toEqual(['CASE.PRT', 'CASE.prt']);
+  });
+
+  it('returns an empty array for an empty input', () => {
+    expect(prtCandidatePaths('')).toEqual([]);
   });
 });
 

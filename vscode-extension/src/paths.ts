@@ -15,6 +15,25 @@
 // Kept free of vscode imports so they can be unit-tested under jest.
 // ---------------------------------------------------------------------------
 
+import * as path from 'path';
+
+/**
+ * Candidate `.PRT` print-file paths for a deck file, most-preferred first.
+ * OPM Flow writes ``<CASE>.PRT`` next to ``<CASE>.DATA`` after a run. The
+ * extension casing varies by platform, so we offer the conventional
+ * uppercase form first and the lowercase form as a fallback; the caller
+ * picks whichever exists on disk. Returns an empty array for an input with
+ * no recognisable basename.
+ */
+export function prtCandidatePaths(deckFsPath: string): string[] {
+  if (!deckFsPath) return [];
+  const dir = path.dirname(deckFsPath);
+  const ext = path.extname(deckFsPath);
+  const base = path.basename(deckFsPath, ext);
+  if (!base) return [];
+  return ['.PRT', '.prt'].map(e => path.join(dir, base + e));
+}
+
 const PATHS_KW_RE = /^\s*PATHS\b/;
 // A PATHS record: 'ALIAS' 'expansion' /  (trailing '/' optional, may be
 // followed by a '--' comment).
