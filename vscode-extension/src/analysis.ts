@@ -9,6 +9,7 @@ import {
   KEYWORD_LINE_RE,
   KEYWORD_LINE_LOOSE_RE,
   SECTION_KEYWORD_SET,
+  matchSectionLine,
 } from './formatting';
 import { DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
 
@@ -268,6 +269,25 @@ export function computeDiagnostics(
       continue;
     }
 
+    // Section header — handled before the generic keyword match so trailing
+    // decoration (`GRID =========`, `SCHEDULE ====`) doesn't hide the section.
+    // Without this the section never advances and every following keyword is
+    // wrongly flagged "not valid in RUNSPEC".
+    const section = matchSectionLine(text);
+    if (section) {
+      if (section.indent > 0) {
+        out.push({
+          line: i,
+          startChar: section.indent,
+          endChar: section.indent + section.name.length,
+          message: `${section.name}: keywords must start in column 1; indented keywords are not recognised by OPM Flow.`,
+        });
+      }
+      closeKw();
+      currentSection = section.name;
+      continue;
+    }
+
     // Lowercase-keyword check: a line shaped like a keyword declaration whose
     // upper-cased form is a recognised keyword. OPM Flow silently ignores
     // such lines, so they need to be surfaced.
@@ -296,20 +316,6 @@ export function computeDiagnostics(
     if (m) {
       const kw = m[1];
       const indent = text.length - text.trimStart().length;
-
-      if (SECTION_KEYWORD_SET.has(kw)) {
-        if (indent > 0) {
-          out.push({
-            line: i,
-            startChar: indent,
-            endChar: indent + kw.length,
-            message: `${kw}: keywords must start in column 1; indented keywords are not recognised by OPM Flow.`,
-          });
-        }
-        closeKw();
-        currentSection = kw;
-        continue;
-      }
 
       // A single uppercase identifier mid-block is more plausibly an
       // unquoted string value (e.g. `INCLUDE` <newline> `PATH`, or

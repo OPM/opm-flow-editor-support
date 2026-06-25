@@ -11,7 +11,7 @@ import {
   isCommentLine,
   KEYWORD_LINE_COL1_RE,
   SECTION_KEYWORDS,
-  SECTION_KEYWORD_SET,
+  matchSectionLine,
   formatRecordGroup,
   parseHeadingPositions,
   formatRecordGroupWithHeading,
@@ -163,8 +163,9 @@ function findCurrentSection(document: vscode.TextDocument, position: vscode.Posi
   for (let lineNum = position.line; lineNum >= 0; lineNum--) {
     const text = document.lineAt(lineNum).text;
     if (text.trim().startsWith('--')) continue;
-    const m = text.match(KEYWORD_LINE_COL1_RE);
-    if (m && SECTION_KEYWORD_SET.has(m[1])) return m[1];
+    // Tolerate trailing decoration after the section name (`GRID ======`).
+    const section = matchSectionLine(text);
+    if (section) return section.name;
   }
   return null;
 }
@@ -690,11 +691,23 @@ class OpmFlowFoldingRangeProvider implements vscode.FoldingRangeProvider {
       const text = document.lineAt(i).text;
       if (text.trim().startsWith('--')) continue;
 
+      const prevEnd = i - 1;
+
+      // Section header — checked first so trailing decoration (`GRID ======`)
+      // still opens a section fold instead of being skipped as a value line.
+      const section = matchSectionLine(text);
+      if (section && section.indent === 0) {
+        pushRange(keywordStart, prevEnd);
+        pushRange(sectionStart, prevEnd);
+        keywordStart = -1;
+        sectionStart = i;
+        continue;
+      }
+
       const m = text.match(KEYWORD_LINE_COL1_RE);
       if (!m) continue;
 
       const kw = m[1];
-      const prevEnd = i - 1;
 
       if (kw === 'END') {
         pushRange(keywordStart, prevEnd);
@@ -704,15 +717,8 @@ class OpmFlowFoldingRangeProvider implements vscode.FoldingRangeProvider {
         continue;
       }
 
-      if (SECTION_KEYWORD_SET.has(kw)) {
-        pushRange(keywordStart, prevEnd);
-        pushRange(sectionStart, prevEnd);
-        keywordStart = -1;
-        sectionStart = i;
-      } else {
-        pushRange(keywordStart, prevEnd);
-        keywordStart = i;
-      }
+      pushRange(keywordStart, prevEnd);
+      keywordStart = i;
     }
 
     const lastLine = document.lineCount - 1;

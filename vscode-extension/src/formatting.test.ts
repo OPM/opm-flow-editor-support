@@ -10,6 +10,7 @@ import {
   buildHeadingAndAlignedRecords,
   tokenColumnCount,
   toggleLineComments,
+  matchSectionLine,
   RecordLine,
 } from './formatting';
 
@@ -260,6 +261,36 @@ describe('isCommentLine', () => {
   test('indented comment', () => { expect(isCommentLine('  -- comment')).toBe(true); });
   test('data line', () => { expect(isCommentLine('1.0 2.0')).toBe(false); });
   test('blank line', () => { expect(isCommentLine('')).toBe(false); });
+});
+
+// ---------------------------------------------------------------------------
+// matchSectionLine
+// ---------------------------------------------------------------------------
+
+describe('matchSectionLine', () => {
+  test('plain section keyword', () => {
+    expect(matchSectionLine('GRID')).toEqual({ name: 'GRID', indent: 0 });
+  });
+  test('trailing "===" separator with a space', () => {
+    expect(matchSectionLine('GRID ==================')).toEqual({ name: 'GRID', indent: 0 });
+  });
+  test('trailing "===" separator with no space', () => {
+    expect(matchSectionLine('SCHEDULE========')).toEqual({ name: 'SCHEDULE', indent: 0 });
+  });
+  test('reports indentation of an indented section header', () => {
+    expect(matchSectionLine('   GRID')).toEqual({ name: 'GRID', indent: 3 });
+  });
+  test('does not match a longer keyword that merely starts with a section name', () => {
+    expect(matchSectionLine('GRIDOPT')).toBeNull();
+    expect(matchSectionLine('GRIDFILE')).toBeNull();
+  });
+  test('does not match a non-section keyword', () => {
+    expect(matchSectionLine('WELSPECS')).toBeNull();
+  });
+  test('does not match a comment or blank line', () => {
+    expect(matchSectionLine('-- GRID')).toBeNull();
+    expect(matchSectionLine('')).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

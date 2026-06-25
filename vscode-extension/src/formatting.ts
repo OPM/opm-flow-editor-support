@@ -114,6 +114,27 @@ export const SECTION_KEYWORDS = [
 
 export const SECTION_KEYWORD_SET: ReadonlySet<string> = new Set(SECTION_KEYWORDS);
 
+/**
+ * Detect a section-header line, tolerating trailing decoration after the
+ * section name. Many decks dress the section line with a visual separator,
+ * e.g. `GRID =================` or `GRID========`; OPM Flow keys only on the
+ * leading token and ignores the rest, so we must too. Without this the GRID
+ * line is mistaken for a record/value, the active section never advances,
+ * and every following keyword is wrongly flagged "not valid in RUNSPEC".
+ *
+ * Returns `{ name, indent }` when the leading token (optionally indented) is
+ * one of the eight section keywords, else `null`. The indent is surfaced so
+ * callers can still flag indented section headers — OPM Flow only recognises
+ * keywords that start in column 1.
+ */
+export function matchSectionLine(text: string): { name: string; indent: number } | null {
+  const m = text.match(/^(\s*)([A-Z][A-Z0-9_+-]*)/);
+  if (!m) return null;
+  const name = m[2];
+  if (!SECTION_KEYWORD_SET.has(name)) return null;
+  return { name, indent: m[1].length };
+}
+
 /** Number of parameter columns a record token represents.
  *  Matches both "N*" (defaulted) and "N*VALUE" (repeated value); both span N positions. */
 export function tokenColumnCount(token: string): number {

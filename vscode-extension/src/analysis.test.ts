@@ -252,6 +252,35 @@ describe('computeDiagnostics — section validity', () => {
     expect(computeDiagnostics(lines, index)).toEqual([]);
   });
 
+  // Regression for #31: a section header dressed with a trailing separator
+  // must still advance the active section, otherwise every following keyword
+  // is wrongly flagged as belonging to RUNSPEC.
+  it('advances the section past a header with a trailing "===" separator', () => {
+    const lines = ['RUNSPEC', 'GRID ==================', 'PORO', '0.1 /'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('handles a trailing separator with no space before it', () => {
+    const lines = ['RUNSPEC', 'GRID==================', 'PORO', '0.1 /'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('flags a wrong-section keyword correctly after a decorated header', () => {
+    const lines = ['GRID =====', 'WELSPECS', '/'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toMatch(/WELSPECS is not valid in GRID/);
+  });
+
+  it('does not mistake a longer keyword for a decorated section', () => {
+    // GRIDFILE / GRIDUNIT etc. must not be read as the GRID section.
+    const lines = ['RUNSPEC', 'GRIDOPT'];
+    const diags = computeDiagnostics(lines, index);
+    // GRIDOPT is unknown here, so it gets the unknown-keyword diagnostic —
+    // crucially it is NOT swallowed as a section header.
+    expect(diags.some(d => d.message.includes('not a recognised'))).toBe(true);
+  });
+
   it('points the diagnostic range at the keyword, not the indent', () => {
     const lines = ['RUNSPEC', '   WELSPECS', '/'];
     const diags = computeDiagnostics(lines, index);
