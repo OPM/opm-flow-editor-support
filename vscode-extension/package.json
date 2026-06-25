@@ -32,12 +32,19 @@
   "activationEvents": [
     "onLanguage:opm-flow",
     "onView:opm-flow.docsView",
+    "onView:opm-flow.outlineView",
     "onStartupFinished"
   ],
   "main": "./out/extension",
   "contributes": {
     "views": {
       "explorer": [
+        {
+          "type": "tree",
+          "id": "opm-flow.outlineView",
+          "name": "OPM Flow Outline",
+          "when": "resourceLangId == opm-flow"
+        },
         {
           "type": "webview",
           "id": "opm-flow.docsView",

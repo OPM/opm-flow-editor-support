@@ -20,6 +20,7 @@ import {
   toggleLineComments,
 } from './formatting';
 import { computeDiagnostics } from './analysis';
+import { buildOutline, OutlineNode } from './outline';
 import { findFileReferences } from './links';
 import { parsePathsAliases, resolvePathAlias } from './paths';
 import { DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
@@ -724,6 +725,81 @@ class OpmFlowFoldingRangeProvider implements vscode.FoldingRangeProvider {
 }
 
 // ---------------------------------------------------------------------------
+// Outline tree view — section -> keyword navigation
+// ---------------------------------------------------------------------------
+
+class OpmFlowOutlineProvider implements vscode.TreeDataProvider<OutlineNode> {
+  private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
+  readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+  private roots: OutlineNode[] = [];
+  /** Source document of the current outline, for the reveal command. */
+  private docUri?: vscode.Uri;
+
+  constructor(private readonly index: KeywordIndex) {}
+
+  /** Rebuild the outline from `doc` (or clear it for non-opm-flow docs). */
+  refresh(doc?: vscode.TextDocument): void {
+    if (doc?.languageId === 'opm-flow') {
+      this.roots = buildOutline(doc.getText().split(/\r?\n/));
+      this.docUri = doc.uri;
+    } else {
+      this.roots = [];
+      this.docUri = undefined;
+    }
+    this._onDidChangeTreeData.fire();
+  }
+
+  getChildren(node?: OutlineNode): OutlineNode[] {
+    return node ? node.children : this.roots;
+  }
+
+  /** Required for `TreeView.reveal` to locate a node. Sections are roots;
+   *  a keyword's parent is the section that contains it (undefined for
+   *  pre-section keywords attached directly to the root). */
+  getParent(node: OutlineNode): OutlineNode | undefined {
+    if (node.kind === 'section') return undefined;
+    return this.roots.find(s => s.children.includes(node));
+  }
+
+  getTreeItem(node: OutlineNode): vscode.TreeItem {
+    const item = new vscode.TreeItem(
+      node.name,
+      node.kind === 'section'
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.None,
+    );
+    item.iconPath = new vscode.ThemeIcon(
+      node.kind === 'section' ? 'symbol-namespace' : 'symbol-keyword',
+    );
+    const summary = resolveKeyword(this.index, node.name)?.summary;
+    if (summary) item.tooltip = summary;
+    if (node.kind === 'keyword' && this.docUri) {
+      item.command = {
+        command: 'opm-flow.revealKeyword',
+        title: 'Go to keyword',
+        arguments: [this.docUri, node.line],
+      };
+    }
+    return item;
+  }
+
+  /** Find the deepest node whose declaration line is at or before `line`. */
+  nodeAtLine(line: number): OutlineNode | undefined {
+    let match: OutlineNode | undefined;
+    for (const section of this.roots) {
+      if (section.line > line) break;
+      match = section;
+      for (const kw of section.children) {
+        if (kw.line > line) break;
+        match = kw;
+      }
+    }
+    return match;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // File-reference link provider — INCLUDE / IMPORT / RESTART / GDFILE
 // ---------------------------------------------------------------------------
 
@@ -1224,6 +1300,57 @@ export function activate(context: vscode.ExtensionContext): void {
   const foldingProvider = vscode.languages.registerFoldingRangeProvider(
     'opm-flow',
     new OpmFlowFoldingRangeProvider()
+  );
+
+  // --- Outline tree view: section -> keyword navigation ---
+  const outlineProvider = new OpmFlowOutlineProvider(index);
+  const outlineView = vscode.window.createTreeView('opm-flow.outlineView', {
+    treeDataProvider: outlineProvider,
+  });
+  outlineProvider.refresh(vscode.window.activeTextEditor?.document);
+
+  const revealKeywordCommand = vscode.commands.registerCommand(
+    'opm-flow.revealKeyword',
+    async (uri: vscode.Uri, line: number) => {
+      const editor = await vscode.window.showTextDocument(uri);
+      const pos = new vscode.Position(line, 0);
+      editor.selection = new vscode.Selection(pos, pos);
+      editor.revealRange(
+        new vscode.Range(pos, pos),
+        vscode.TextEditorRevealType.InCenter,
+      );
+    },
+  );
+
+  const refreshOutline = debounce((doc: vscode.TextDocument) => {
+    outlineProvider.refresh(doc);
+  }, 250);
+
+  // Keep the tree's selection in sync with the cursor's active keyword.
+  let lastRevealedLine = -1;
+  const syncOutlineSelection = (editor: vscode.TextEditor): void => {
+    if (editor.document.languageId !== 'opm-flow' || !outlineView.visible) return;
+    const node = outlineProvider.nodeAtLine(editor.selection.active.line);
+    if (!node || node.line === lastRevealedLine) return;
+    lastRevealedLine = node.line;
+    void outlineView.reveal(node, { select: true, focus: false });
+  };
+
+  context.subscriptions.push(
+    outlineView,
+    revealKeywordCommand,
+    vscode.window.onDidChangeActiveTextEditor(editor => {
+      outlineProvider.refresh(editor?.document);
+      lastRevealedLine = -1;
+    }),
+    vscode.workspace.onDidChangeTextDocument(e => {
+      if (e.document === vscode.window.activeTextEditor?.document) {
+        refreshOutline(e.document);
+      }
+    }),
+    vscode.window.onDidChangeTextEditorSelection(e => {
+      syncOutlineSelection(e.textEditor);
+    }),
   );
 
   // --- Diagnostics: over-arity records and wrong-section keywords ---
