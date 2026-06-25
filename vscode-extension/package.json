@@ -134,10 +134,19 @@
       {
         "command": "opm-flow.toggleLineComment",
         "title": "OPM Flow: Toggle Line Comment"
+      },
+      {
+        "command": "opm-flow.openPrtFile",
+        "title": "OPM Flow: Open PRT File"
       }
     ],
     "menus": {
       "editor/context": [
+        {
+          "command": "opm-flow.openPrtFile",
+          "when": "resourceLangId == opm-flow && resourceExtname =~ /^\\.data$/i",
+          "group": "opm-flow"
+        },
         {
           "command": "opm-flow.alignRecordColumns",
           "when": "resourceLangId == opm-flow",
