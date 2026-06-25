@@ -109,6 +109,24 @@ The panel shows the keyword name, the section(s) it applies to, the summary,
 the parameter table, and the example. This is the main view for reading long
 keyword documentation, since it scrolls freely and stays visible while you edit.
 
+By default each parameter's **Type, units, and Default** are folded into a
+compact muted sub-line beneath its description (the **embedded** layout). This
+keeps the Description readable even for keywords with many parameters (e.g.
+`WECON`), where a wide column grid otherwise squeezes it into a sliver. Set
+`opm-flow.docs.layout` to `columns` to restore the original separate-column
+table; the per-column show/hide settings (see [Settings](#settings)) still apply
+in either layout.
+
+### Keyword Outline (Tree View)
+
+The **OPM Flow Outline** panel in the Explorer sidebar shows the deck as a
+two-level tree — each section (`RUNSPEC`, `GRID`, `EDIT`, `PROPS`, `REGIONS`,
+`SOLUTION`, `SUMMARY`, `SCHEDULE`) with its keywords nested underneath. Click any
+keyword to jump straight to it in the editor; the tree selection also follows the
+cursor as you move through the deck, and the view tracks the active file.
+Sections are collapsible, so you can fold away the parts of a large deck you are
+not working on. Each node carries the keyword summary as a tooltip.
+
 ### Collapse Sections and Keywords
 
 Sections and individual keywords can be folded in the editor gutter. A section
@@ -202,6 +220,14 @@ INCLUDE
   'grid/PERM.inc' /
 ```
 
+### Open PRT File
+
+With a `.DATA` deck open, **OPM Flow: Open PRT File** opens the matching
+`<CASE>.PRT` print/output file from the same folder — the file OPM Flow writes
+after a run. It is available from the editor right-click menu, the Command
+Palette, or the `Ctrl+Alt+P` (`Cmd+Alt+P` on macOS) shortcut. If the deck has
+not been run yet and no `.PRT` exists beside it, a notice is shown.
+
 ### Generate Keyword Reference
 
 **OPM Flow: Generate Keyword Reference** (Command Palette `Ctrl+Shift+P`) opens a
@@ -232,11 +258,18 @@ you can override them per-workspace or per-folder.
 | --- | --- | --- |
 | `opm-flow.completion.stringValueStyle` | `"quoted"` | How STRING-typed parameter values appear in the suggestion list. `"quoted"` shows only `'OPEN'`; `"unquoted"` shows only `OPEN`; `"both"` shows each option twice (e.g. `OPEN` and `'OPEN'`). Inside an existing quoted token only the quoted form is offered regardless of this setting. |
 
+### Docs layout
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `opm-flow.docs.layout` | `"embedded"` | How the docs sidebar and hover tooltips lay out parameter metadata. `"embedded"` folds Type, units, and Default into a compact sub-line beneath each description (more room for the description); `"columns"` renders them as separate table columns (the original layout). The show/hide settings below apply in either layout. |
+
 ### Docs sidebar and hover columns
 
-These toggles control which columns appear in the keyword docs sidebar
-and hover tooltips. Disabling unused columns gives the parameter table
-more horizontal room in narrow side panels.
+These toggles control which Type, unit, and Default values appear in the keyword
+docs sidebar and hover tooltips — as columns in the `columns` layout, or as bits
+of the metadata sub-line in the `embedded` layout. Disabling unused values gives
+the description more horizontal room in narrow side panels.
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -274,6 +307,27 @@ The language is registered as `opm-flow`.
 - Python 3.10+ with `lxml` (only required when regenerating the keyword index)
 
 ## Release Notes
+
+### 0.8.0
+
+- **Keyword outline tree view** (Issue #41) — a new **OPM Flow Outline** panel in
+  the Explorer shows sections and their keywords as a navigable, collapsible
+  tree. Click a keyword to jump to it in the editor; the selection follows the
+  cursor and the view tracks the active file.
+- **Compact parameter docs layout** (Issue #26) — parameter Type, units, and
+  Default are now folded into a muted sub-line beneath each description (the new
+  default `embedded` layout), giving long descriptions far more room in the docs
+  sidebar and hover tooltips. Set `opm-flow.docs.layout` to `columns` to keep the
+  previous separate-column table.
+- **Open PRT file** (Issue #44) — open the matching `<CASE>.PRT` print file next
+  to a `.DATA` deck from the editor right-click menu, the Command Palette, or the
+  new `Ctrl+Alt+P` (`Cmd+Alt+P` on macOS) shortcut.
+- **Section headers with trailing separators** (Issue #31) — a decorated section
+  line such as `GRID ==============` is now recognised as a section header, so
+  keywords after it are no longer wrongly flagged "not valid in RUNSPEC" and
+  section folds still open correctly.
+- **Dependency and CI maintenance** — routine dev-dependency and GitHub Actions
+  updates.
 
 ### 0.7.1
 
