@@ -170,6 +170,12 @@
         "key": "ctrl+/",
         "mac": "cmd+/",
         "when": "editorTextFocus && !editorReadonly && editorLangId == opm-flow"
+      },
+      {
+        "command": "opm-flow.openPrtFile",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p",
+        "when": "editorLangId == opm-flow"
       }
     ],
     "configuration": {
