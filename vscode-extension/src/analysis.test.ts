@@ -232,6 +232,41 @@ describe('computeDiagnostics — section validity', () => {
     expect(diags[0].endChar).toBe('WELSPECS'.length);
   });
 
+  it('suppresses the wrong-section check after an INCLUDE (sections may be split across files)', () => {
+    // SPE5-style master deck: RUNSPEC then an INCLUDE that pulls in the rest of
+    // the sections, followed by SCHEDULE keywords written in the master file.
+    const lines = [
+      'RUNSPEC',
+      'INCLUDE',
+      "  'SPE5.BASE' /",
+      'WELSPECS',         // SCHEDULE-only, but reachable via the included file
+      "  'W1' 'G' 1 1 /",
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => /is not valid in/.test(d.message))).toBe(false);
+  });
+
+  it('still flags a wrong-section keyword when no INCLUDE precedes it', () => {
+    const lines = ['RUNSPEC', 'WELSPECS', "  'W1' 'G' 1 1 /", '/'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => /is not valid in/.test(d.message))).toBe(true);
+  });
+
+  it('re-enables the wrong-section check after a later section header resets the INCLUDE state', () => {
+    const lines = [
+      'RUNSPEC',
+      'INCLUDE',
+      "  'grid.inc' /",
+      'GRID',             // explicit header resets the include-suppression
+      'WELSPECS',         // SCHEDULE-only, now genuinely wrong
+      "  'W1' 'G' 1 1 /",
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => /WELSPECS is not valid in GRID/.test(d.message))).toBe(true);
+  });
+
   it('does not flag a keyword in one of its valid sections', () => {
     const lines = ['SCHEDULE', 'WELSPECS', '/'];
     expect(computeDiagnostics(lines, index)).toEqual([]);

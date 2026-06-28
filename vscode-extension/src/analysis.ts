@@ -224,6 +224,12 @@ export function computeDiagnostics(
   let listTerminatorSeen = false;
   let arrayTerminatorSeen = false;
   let currentSection: string | null = null;
+  // True once an INCLUDE/IMPORT/GDFILE has appeared since the last section
+  // header. An included file may itself contain section headers (decks
+  // routinely split SECTIONS across includes — e.g. RUNSPEC in the master
+  // deck, the rest pulled in via INCLUDE), so once we've seen one we can no
+  // longer trust `currentSection` and must suppress the wrong-section check.
+  let includeSinceSection = false;
 
   const closeKw = (): void => {
     if (!activeKw) return;
@@ -295,6 +301,7 @@ export function computeDiagnostics(
       }
       closeKw();
       currentSection = section.name;
+      includeSinceSection = false;
       continue;
     }
 
@@ -386,10 +393,19 @@ export function computeDiagnostics(
           continue;
         }
 
-        // Section-validity check
+        // A file-loading keyword may pull in section headers from another
+        // file, after which `currentSection` can no longer be trusted.
+        if (kw === 'INCLUDE' || kw === 'IMPORT' || kw === 'GDFILE') {
+          includeSinceSection = true;
+        }
+
+        // Section-validity check. Suppressed once an INCLUDE/IMPORT/GDFILE has
+        // appeared since the last section header, to avoid false positives on
+        // decks whose sections are split across included files.
         if (
           activeKw?.sections?.length &&
           currentSection &&
+          !includeSinceSection &&
           !activeKw.sections.includes(currentSection)
         ) {
           out.push({
