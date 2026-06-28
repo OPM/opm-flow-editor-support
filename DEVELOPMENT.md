@@ -52,6 +52,37 @@ npm run compile        # TypeScript → out/
 npx vsce package       # produce a .vsix
 ```
 
+## Tests
+
+The extension's logic is covered by Jest unit tests (run under `ts-jest`):
+
+```sh
+cd vscode-extension
+npm test               # all unit tests
+npx jest analysis      # a single suite
+```
+
+### Corpus false-positive harness
+
+`src/corpus.test.ts` runs the diagnostics engine over the
+[OPM/opm-tests](https://github.com/OPM/opm-tests) decks. Those decks are
+known-good (they parse and run in OPM Flow), so any diagnostic emitted on them is
+a suspected false positive — an analyzer bug, a keyword/shape missing from the
+index, or an exclusion candidate.
+
+Point it at a local clone via `OPM_TESTS_DIR` (it defaults to
+`M:/gitroot/opm-tests`); the harness is skipped automatically when no clone is
+found, so the normal `npm test` and CI runs are unaffected:
+
+```sh
+cd vscode-extension
+OPM_TESTS_DIR=/path/to/opm-tests npx jest corpus
+```
+
+It writes a triage report to `vscode-extension/corpus-report.md` (gitignored)
+grouping suspected false positives by diagnostic type and keyword, plus the
+noisiest files.
+
 ## Regenerate the keyword index
 
 The shipped `vscode-extension/data/keyword_index_compact.json` is generated
