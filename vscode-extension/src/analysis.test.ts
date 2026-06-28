@@ -363,6 +363,37 @@ describe('computeDiagnostics — terminators', () => {
     expect(computeDiagnostics(lines, index)).toEqual([]);
   });
 
+  it('accepts a fixed-size record whose terminating / is on its own line', () => {
+    // OPM Flow allows the '/' to sit on a line after the values
+    // (MINPV / PINCH / SPECGRID are commonly written this way).
+    const lines = ['RUNSPEC', 'DIMENS', '10 10 10', '/'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('accepts a fixed-size record split across several value lines before the /', () => {
+    const lines = ['RUNSPEC', 'DIMENS', '10', '10 10', '/'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('still flags a fixed-size record with no / before the next keyword', () => {
+    const lines = ['RUNSPEC', 'DIMENS', '10 10 10', 'OIL'];
+    const diags = computeDiagnostics(lines, index);
+    const recordDiag = diags.find(d => d.message.includes('missing the terminating'));
+    expect(recordDiag).toBeDefined();
+    expect(recordDiag!.line).toBe(2);
+  });
+
+  it('accepts a list record whose values and / are on separate lines', () => {
+    const lines = [
+      'SCHEDULE',
+      'WELSPECS',
+      "'W1' 'G' 1 1",
+      '/',                 // terminates the record
+      '/',                 // terminates the list
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
   it('flags a list-keyword block missing its terminating / before the next keyword', () => {
     const lines = [
       'SCHEDULE',

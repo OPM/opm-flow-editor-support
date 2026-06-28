@@ -221,6 +221,14 @@ export function computeDiagnostics(
   let currentRecord = 1;
   let lastRecordLine = -1;
   let lastRecordEndChar = 0;
+  // An "open" record is one whose value tokens have been seen but whose
+  // terminating '/' has not yet appeared. OPM Flow lets a record's '/' sit on
+  // a later line (`MINPV` <nl> ` 10` <nl> `/`), so we defer the
+  // missing-terminator diagnostic until the record is closed (by a '/') or the
+  // block ends with it still open. -1 means no record is currently open.
+  let openRecordLine = -1;
+  let openRecordStart = 0;
+  let openRecordEnd = 0;
   let listTerminatorSeen = false;
   let arrayTerminatorSeen = false;
   let currentSection: string | null = null;
@@ -233,6 +241,22 @@ export function computeDiagnostics(
 
   const closeKw = (): void => {
     if (!activeKw) return;
+    // A record left open at the block boundary (no '/' before the next keyword,
+    // section header, or end of file) is a genuine missing terminator. Flag it
+    // for record-taking keywords; variadic-record keywords are exempt (their
+    // records legitimately span many lines and are not '/'-per-line).
+    if (
+      openRecordLine >= 0 &&
+      !activeKw.variadic_record &&
+      (activeKw.size_kind === 'fixed' || activeKw.size_kind === 'list')
+    ) {
+      out.push({
+        line: openRecordLine,
+        startChar: openRecordStart,
+        endChar: openRecordEnd,
+        message: `${activeKw.name}: record is missing the terminating '/'.`,
+      });
+    }
     // Optional-body keywords (non-F SUMMARY mnemonics) may appear bare
     // and stacked, so a block that consumed no records doesn't need a
     // closing '/'. Once values are present the normal array/list rule
@@ -271,6 +295,9 @@ export function computeDiagnostics(
     lastRecordEndChar = 0;
     listTerminatorSeen = false;
     arrayTerminatorSeen = false;
+    openRecordLine = -1;
+    openRecordStart = 0;
+    openRecordEnd = 0;
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -278,10 +305,20 @@ export function computeDiagnostics(
     if (isCommentLine(text)) continue;
     if (text.trim() === '') continue;
 
-    // A line that is just '/' (with optional comment) is the list terminator.
+    // A line that is just '/' (with optional comment). When a record is open
+    // (its values were on previous lines) this '/' terminates that record. When
+    // no record is open it is the block terminator that closes a record list or
+    // value array.
     if (isStandaloneTerminator(text)) {
-      if (activeKw?.size_kind === 'list') listTerminatorSeen = true;
-      if (activeKw?.size_kind === 'array') arrayTerminatorSeen = true;
+      if (openRecordLine >= 0) {
+        openRecordLine = -1;
+        if (activeKw?.records_meta) {
+          currentRecord = Math.min(currentRecord + 1, activeKw.records_meta.length);
+        }
+      } else {
+        if (activeKw?.size_kind === 'list') listTerminatorSeen = true;
+        if (activeKw?.size_kind === 'array') arrayTerminatorSeen = true;
+      }
       continue;
     }
 
@@ -459,22 +496,20 @@ export function computeDiagnostics(
       }
     }
 
-    // Missing record terminator: only flag when we know the keyword takes
-    // records (size_kind of 'fixed' or 'list'). If size_kind is unknown we
-    // stay quiet rather than risk false positives. Variadic-record keywords
-    // (RSVD, RVVD, PVDO, …) are also exempt — their records span multiple
-    // lines, and only the line carrying '/' completes the record.
-    if (
-      !hasTerm &&
+    // Record terminator tracking. OPM Flow allows a record's '/' to appear on a
+    // later line, so we don't flag a missing terminator here — we mark the
+    // record "open" and let the standalone-'/' handler close it, or closeKw
+    // flag it if the block ends with the record still open. A trailing '/' on
+    // this line closes the record immediately.
+    if (hasTerm) {
+      openRecordLine = -1;
+    } else if (
       !activeKw.variadic_record &&
       (activeKw.size_kind === 'fixed' || activeKw.size_kind === 'list')
     ) {
-      out.push({
-        line: i,
-        startChar: lastTok.start,
-        endChar: lastTok.end,
-        message: `${activeKw.name}: record is missing the terminating '/'.`,
-      });
+      openRecordLine = i;
+      openRecordStart = lastTok.start;
+      openRecordEnd = lastTok.end;
     }
 
     // For array-kind keywords, a '/' trailing the last value line closes
