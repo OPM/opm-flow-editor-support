@@ -245,6 +245,13 @@ export function computeDiagnostics(
   lines: string[],
   index: AnalysisIndex,
   excludedKeywords: ReadonlySet<string> = DIAGNOSTICS_EXCLUDED_KEYWORDS,
+  /**
+   * Anchored regexes for open-ended summary-vector families (UDQ, tracer,
+   * water-cut-bucket mnemonics) from opm-common's `deck_name_regex`. A token
+   * matching one of these is a recognised SUMMARY vector and is not flagged as
+   * an unknown keyword. Each regex should already be anchored (`^…$`).
+   */
+  summaryNamePatterns: readonly RegExp[] = [],
 ): LineDiagnostic[] {
   const out: LineDiagnostic[] = [];
   let activeKw: AnalysisEntry | null = null;
@@ -480,6 +487,9 @@ export function computeDiagnostics(
           // Standard L-modifier summary vectors (WOPRL completion-level,
           // LWWIR LGR-local) built on an indexed SUMMARY base vector.
           if (isSummaryModifierVector(index, kw)) continue;
+          // Open-ended summary-vector families from opm-common's
+          // deck_name_regex (UDQ, tracer, water-cut-bucket mnemonics).
+          if (summaryNamePatterns.some(re => re.test(kw))) continue;
           out.push({
             line: i,
             startChar: activeKwIndent,

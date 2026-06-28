@@ -635,6 +635,22 @@ describe('computeDiagnostics — unknown keywords', () => {
     expect(computeDiagnostics(lines, local).some(d => /not a recognised/.test(d.message))).toBe(false);
   });
 
+  it('recognises summary-vector family tokens via supplied deck_name_regex patterns', () => {
+    // Tracer/water-cut family patterns from opm-common deck_name_regex,
+    // anchored as the extension does before calling computeDiagnostics.
+    const patterns = [/^(?:WTPR.+|WTPT.+)$/];
+    const lines = ['SUMMARY', 'WTPRTR1', 'WTPTTR1'];
+    expect(computeDiagnostics(lines, index, undefined, patterns)
+      .some(d => /not a recognised/.test(d.message))).toBe(false);
+  });
+
+  it('still flags a token that matches no supplied pattern', () => {
+    const patterns = [/^(?:WTPR.+)$/];
+    const lines = ['SUMMARY', 'NOPE'];
+    expect(computeDiagnostics(lines, index, undefined, patterns)
+      .some(d => /NOPE.*not a recognised/.test(d.message))).toBe(true);
+  });
+
   it('still flags an L-suffixed token whose stripped base is not a summary vector', () => {
     // "CONTROL" -> base "CONTRO" is not an indexed SUMMARY vector, so it is
     // still reported rather than silently accepted.

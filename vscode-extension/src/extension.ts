@@ -87,6 +87,22 @@ function loadKeywordIndex(context: vscode.ExtensionContext): KeywordIndex {
   }
 }
 
+/**
+ * Load the open-ended summary-vector regex families (UDQ, tracer, water-cut
+ * mnemonics) emitted alongside the index from opm-common's `deck_name_regex`.
+ * Each source pattern is anchored so a deck token must match in full.
+ */
+function loadSummaryPatterns(context: vscode.ExtensionContext): RegExp[] {
+  const p = path.join(context.extensionPath, 'data', 'summary_name_patterns.json');
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, 'utf-8')) as string[];
+    return raw.map(src => new RegExp(`^(?:${src})$`));
+  } catch (e) {
+    console.error('OPM Flow: failed to load summary-vector patterns', e);
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Backward keyword scanner
 // ---------------------------------------------------------------------------
@@ -930,11 +946,12 @@ function refreshDiagnostics(
   document: vscode.TextDocument,
   index: KeywordIndex,
   collection: vscode.DiagnosticCollection,
+  summaryPatterns: readonly RegExp[],
 ): void {
   if (document.languageId !== 'opm-flow') return;
   const lines = document.getText().split(/\r?\n/);
   const excluded = getExcludedKeywords(document.uri);
-  const diags = computeDiagnostics(lines, index, excluded).map(d => {
+  const diags = computeDiagnostics(lines, index, excluded, summaryPatterns).map(d => {
     const range = new vscode.Range(d.line, d.startChar, d.line, d.endChar);
     const out = new vscode.Diagnostic(range, d.message, vscode.DiagnosticSeverity.Warning);
     out.source = 'OPM Flow';
@@ -1473,22 +1490,23 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // --- Diagnostics: over-arity records and wrong-section keywords ---
+  const summaryPatterns = loadSummaryPatterns(context);
   const diagnostics = vscode.languages.createDiagnosticCollection('opm-flow');
   const refreshDiags = debounce((doc: vscode.TextDocument) => {
-    refreshDiagnostics(doc, index, diagnostics);
+    refreshDiagnostics(doc, index, diagnostics, summaryPatterns);
   }, 250);
   for (const editor of vscode.window.visibleTextEditors) {
-    refreshDiagnostics(editor.document, index, diagnostics);
+    refreshDiagnostics(editor.document, index, diagnostics, summaryPatterns);
   }
   context.subscriptions.push(
     diagnostics,
-    vscode.workspace.onDidOpenTextDocument(doc => refreshDiagnostics(doc, index, diagnostics)),
+    vscode.workspace.onDidOpenTextDocument(doc => refreshDiagnostics(doc, index, diagnostics, summaryPatterns)),
     vscode.workspace.onDidChangeTextDocument(e => refreshDiags(e.document)),
     vscode.workspace.onDidCloseTextDocument(doc => diagnostics.delete(doc.uri)),
     vscode.workspace.onDidChangeConfiguration(e => {
       if (!e.affectsConfiguration('opm-flow.diagnostics.excludedKeywords')) return;
       for (const doc of vscode.workspace.textDocuments) {
-        refreshDiagnostics(doc, index, diagnostics);
+        refreshDiagnostics(doc, index, diagnostics, summaryPatterns);
       }
     }),
   );

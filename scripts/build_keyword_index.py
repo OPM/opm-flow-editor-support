@@ -199,6 +199,13 @@ def load_opm_common_index(keywords_dir: Path) -> dict:
                     "records":    data.get("records"),
                     "size_kind":  size_kind,
                     "size_count": size_count,
+                    # Summary-vector "PROBE" families (WELL_PROBE, FIELD_PROBE,
+                    # …) enumerate their concrete deck mnemonics here, plus a
+                    # regex for the open-ended families (UDQ, tracers). Retained
+                    # so the build can expand them into recognised entries.
+                    "deck_names":       data.get("deck_names"),
+                    "deck_name_regex":  data.get("deck_name_regex"),
+                    "comment":          data.get("comment", ""),
                 }
                 total += 1
     print(f"Loaded {total} keywords from opm-common ({keywords_dir})")
@@ -572,6 +579,64 @@ def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
         added += 1
     print(f"Synthesized {added} OPM-only entries")
     return added
+
+
+def _probe_summary(comment: str, probe_name: str) -> str:
+    """One-line summary for an expanded summary-vector entry, derived from the
+    PROBE family comment (first non-empty line, trimmed)."""
+    for line in (comment or "").splitlines():
+        line = line.strip()
+        if line:
+            return (line[:117] + "...") if len(line) > 120 else line
+    return f"OPM Flow summary vector ({probe_name})"
+
+
+def expand_probe_deck_names(index: dict, opm_common_index: dict) -> int:
+    """
+    Expand the ``deck_names`` of opm-common summary-vector PROBE families
+    (WELL_PROBE, FIELD_PROBE, BLOCK_PROBE, …) into individual recognised
+    entries. Each is a minimal entry (name, sections, one-line summary) with no
+    size shape, so it is recognised by the diagnostics engine without triggering
+    arity or terminator checks. Existing entries (e.g. WOPR from the manual) are
+    left untouched. Returns the number of entries added.
+    """
+    added = 0
+    for probe_name, opm in opm_common_index.items():
+        deck_names = opm.get("deck_names")
+        if not deck_names:
+            continue
+        sections = list(opm.get("sections", []))
+        summary = _probe_summary(opm.get("comment", ""), probe_name)
+        for dn in deck_names:
+            if not dn or dn in index:
+                continue
+            index[dn] = {
+                "name":         dn,
+                "section":      sections[0] if sections else "",
+                "sections_opm": sections,
+                "supported":    True,
+                "summary":      summary,
+                "description":  "",
+                "parameters":   [],
+                "examples":     [],
+                "full_text":    "",
+                "source_file":  "",
+            }
+            added += 1
+    print(f"Expanded {added} summary-vector deck names")
+    return added
+
+
+def collect_deck_name_regexes(opm_common_index: dict) -> list[str]:
+    """Unique ``deck_name_regex`` patterns across all PROBE families, used by
+    the diagnostics engine to recognise open-ended summary-vector families
+    (UDQ, tracer, water-cut-bucket mnemonics)."""
+    seen: dict[str, None] = {}
+    for opm in opm_common_index.values():
+        rx = opm.get("deck_name_regex")
+        if rx:
+            seen.setdefault(rx, None)
+    return list(seen)
 
 
 # ---------------------------------------------------------------------------
@@ -1636,6 +1701,7 @@ def main():
         merge_opm_common(index, opm_common_index)
         synthesize_opm_only_entries(index, opm_common_index)
         add_directional_variants(index)
+        expand_probe_deck_names(index, opm_common_index)
         attach_string_options(index)
 
     write_json(index, Path(args.output))
@@ -1643,6 +1709,15 @@ def main():
         write_summary_tsv(index, Path(args.tsv))
     if args.compact:
         write_compact_json(index, Path(args.compact))
+        # Emit the open-ended summary-vector regex families next to the compact
+        # index so the extension can recognise UDQ/tracer/water-cut mnemonics
+        # that are not enumerated as explicit deck names.
+        if args.opm_common_dir:
+            patterns = collect_deck_name_regexes(opm_common_index)
+            patterns_path = Path(args.compact).with_name("summary_name_patterns.json")
+            with open(patterns_path, "w", encoding="utf-8") as f:
+                json.dump(patterns, f, separators=(",", ":"), ensure_ascii=False)
+            print(f"Wrote summary-vector patterns: {patterns_path} ({len(patterns)} patterns)")
 
 
 if __name__ == "__main__":

@@ -34,6 +34,8 @@ from build_keyword_index import (
     load_opm_common_index,
     merge_opm_common,
     synthesize_opm_only_entries,
+    expand_probe_deck_names,
+    collect_deck_name_regexes,
     add_directional_variants,
     extract_string_options,
     attach_string_options,
@@ -1405,3 +1407,39 @@ class TestAddDirectionalVariants:
         # KRNUMX already present (kept untouched); only Y and Z added. IMBNUM absent.
         assert added == 2
         assert index["KRNUMX"].get("custom") is True
+
+
+class TestExpandProbeDeckNames:
+    def test_expands_deck_names_into_minimal_entries(self):
+        index = {}
+        opm = {
+            "WELL_PROBE": {
+                "sections": ["SUMMARY"],
+                "deck_names": ["WOPR", "WWIP", "WGIP"],
+                "comment": "Well summary vectors.\nSecond line.",
+            }
+        }
+        added = expand_probe_deck_names(index, opm)
+        assert added == 3
+        assert index["WWIP"]["name"] == "WWIP"
+        assert index["WWIP"]["sections_opm"] == ["SUMMARY"]
+        assert index["WWIP"]["summary"] == "Well summary vectors."
+        # No size shape -> no terminator/arity checks downstream.
+        assert "size_kind" not in index["WWIP"]
+
+    def test_does_not_overwrite_existing_entries(self):
+        index = {"WOPR": {"name": "WOPR", "summary": "from manual"}}
+        opm = {"WELL_PROBE": {"sections": ["SUMMARY"], "deck_names": ["WOPR", "WWIP"]}}
+        added = expand_probe_deck_names(index, opm)
+        assert added == 1
+        assert index["WOPR"]["summary"] == "from manual"
+
+    def test_collect_deck_name_regexes_dedupes(self):
+        opm = {
+            "A": {"deck_name_regex": "WU.+"},
+            "B": {"deck_name_regex": "WU.+"},
+            "C": {"deck_name_regex": "FU.+"},
+            "D": {},
+        }
+        rx = collect_deck_name_regexes(opm)
+        assert sorted(rx) == ["FU.+", "WU.+"]
