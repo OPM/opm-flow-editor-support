@@ -656,6 +656,18 @@ class TestLoadOpmCommonIndex:
         idx = load_opm_common_index(tmp_path)
         assert idx == {}
 
+    def test_loads_requires_and_prohibits(self, tmp_path):
+        self._write_kw(tmp_path, "000_Eclipse100", "B", "BRANPROP", {
+            "name": "BRANPROP",
+            "sections": ["SCHEDULE"],
+            "requires": ["NETWORK"],
+            "prohibits": ["GRUPNET"],
+            "items": [],
+        })
+        idx = load_opm_common_index(tmp_path)
+        assert idx["BRANPROP"]["requires"] == ["NETWORK"]
+        assert idx["BRANPROP"]["prohibits"] == ["GRUPNET"]
+
     def test_title_size_kind_overridden_to_none(self, tmp_path):
         # opm-common describes TITLE as size:1 with a single size_type:ALL
         # STRING item — the generic classifier would call this fixed/1 and
@@ -796,6 +808,37 @@ class TestMergeOpmCommon:
         merge_opm_common(index, {})  # no opm-common entry
         assert "value_type" not in index["OBSCURE"]["parameters"][0]
         assert "sections_opm" not in index["OBSCURE"]
+
+    def test_requires_and_prohibits_copied_from_opm_common(self):
+        # AQUCT requires AQUDIMS; BRANPROP requires NETWORK and prohibits GRUPNET.
+        index = {"BRANPROP": self._manual_entry(sections=("SCHEDULE",))}
+        opm = {"BRANPROP": {
+            "sections": ["SCHEDULE"],
+            "items": [],
+            "requires": ["NETWORK"],
+            "prohibits": ["GRUPNET"],
+        }}
+        merge_opm_common(index, opm)
+        assert index["BRANPROP"]["requires"] == ["NETWORK"]
+        assert index["BRANPROP"]["prohibits"] == ["GRUPNET"]
+
+    def test_requires_prohibits_omitted_when_absent(self):
+        index = {"ACTDIMS": self._manual_entry()}
+        opm = {"ACTDIMS": {"sections": ["RUNSPEC"], "items": []}}
+        merge_opm_common(index, opm)
+        assert "requires" not in index["ACTDIMS"]
+        assert "prohibits" not in index["ACTDIMS"]
+
+    def test_requires_prohibits_set_on_all_list_form_entries(self):
+        e1 = self._manual_entry(sections=("RUNSPEC",))
+        e2 = self._manual_entry(sections=("GRID",))
+        index = {"KW": [e1, e2]}
+        opm = {"KW": {"sections": ["RUNSPEC", "GRID"], "items": [],
+                      "requires": ["DEP"], "prohibits": ["FOE"]}}
+        merge_opm_common(index, opm)
+        for e in index["KW"]:
+            assert e["requires"] == ["DEP"]
+            assert e["prohibits"] == ["FOE"]
 
     def test_merge_handles_list_form_entries(self):
         # Multi-section keywords are stored as a list of entries
@@ -1005,6 +1048,19 @@ class TestSynthesizeOpmOnly:
         added = synthesize_opm_only_entries(index, opm)
         assert added == 0
         assert index["EXISTING"]["summary"] == "kept"
+
+    def test_synthesized_entry_carries_requires_and_prohibits(self):
+        # THERMEXR is an OPM-only keyword that prohibits THELCOEF.
+        index: dict = {}
+        opm = {"THERMEXR": {
+            "sections": ["GRID"],
+            "items": [],
+            "data": {"value_type": "DOUBLE"},
+            "prohibits": ["THELCOEF"],
+        }}
+        synthesize_opm_only_entries(index, opm)
+        assert index["THERMEXR"]["prohibits"] == ["THELCOEF"]
+        assert "requires" not in index["THERMEXR"]
 
     def test_synthesized_entry_with_no_items_has_empty_params(self):
         index: dict = {}

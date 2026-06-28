@@ -1376,6 +1376,135 @@ describe('computeDiagnostics — TUNING (issue #12)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Cross-keyword constraints — requires / prohibits (plan item 1)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — requires / prohibits', () => {
+  // BRANPROP requires NETWORK and prohibits GRUPNET (opm-common). AQUCT
+  // requires AQUDIMS. THERMAL/TEMP are mutually exclusive — only THERMAL
+  // declares the prohibition in opm-common, so the engine must report it
+  // from whichever side carries the field.
+  const xIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    BRANPROP: {
+      name: 'BRANPROP',
+      sections: ['SCHEDULE'],
+      size_kind: 'list',
+      requires: ['NETWORK'],
+      prohibits: ['GRUPNET'],
+    },
+    NETWORK: { name: 'NETWORK', sections: ['RUNSPEC'], size_kind: 'fixed', size_count: 1 },
+    GRUPNET: { name: 'GRUPNET', sections: ['SCHEDULE'], size_kind: 'list' },
+    AQUCT: { name: 'AQUCT', sections: ['SOLUTION'], size_kind: 'list', requires: ['AQUDIMS'] },
+    AQUDIMS: { name: 'AQUDIMS', sections: ['RUNSPEC'], size_kind: 'fixed', size_count: 1 },
+    THERMAL: { name: 'THERMAL', sections: ['RUNSPEC'], size_kind: 'none', prohibits: ['TEMP'] },
+    TEMP: { name: 'TEMP', sections: ['PROPS'], size_kind: 'array' },
+  };
+
+  it('flags a keyword whose required partner is missing', () => {
+    const lines = ['SCHEDULE', 'BRANPROP', '/'];
+    const diags = computeDiagnostics(lines, xIndex);
+    const req = diags.find(d => /requires NETWORK/.test(d.message));
+    expect(req).toBeDefined();
+    expect(req!.line).toBe(1);
+    expect(req!.startChar).toBe(0);
+    expect(req!.endChar).toBe('BRANPROP'.length);
+  });
+
+  it('does not flag when the required partner is present', () => {
+    const lines = [
+      'RUNSPEC',
+      'NETWORK',
+      '5 5 /',
+      'SCHEDULE',
+      'BRANPROP',
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, xIndex);
+    expect(diags.some(d => /requires NETWORK/.test(d.message))).toBe(false);
+  });
+
+  it('suppresses the requires check when the deck pulls in an INCLUDE file', () => {
+    // NETWORK may be defined in the included file, so don't cry wolf.
+    const lines = [
+      'RUNSPEC',
+      'INCLUDE',
+      "  'props.inc' /",
+      'SCHEDULE',
+      'BRANPROP',
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, xIndex);
+    expect(diags.some(d => /requires NETWORK/.test(d.message))).toBe(false);
+  });
+
+  it('anchors the diagnostic on an indented requiring keyword token', () => {
+    // (Indented keywords also get a column-1 diagnostic; the requires one
+    // must still point at the token, not the indent.)
+    const lines = ['SCHEDULE', '  BRANPROP', '/'];
+    const diags = computeDiagnostics(lines, xIndex);
+    const req = diags.find(d => /requires NETWORK/.test(d.message));
+    expect(req).toBeDefined();
+    expect(req!.startChar).toBe(2);
+    expect(req!.endChar).toBe(2 + 'BRANPROP'.length);
+  });
+
+  it('flags a prohibits conflict when both keywords are present', () => {
+    const lines = [
+      'SCHEDULE',
+      'BRANPROP',
+      '/',
+      'GRUPNET',
+      "'FIELD' 1* 1* /",
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, xIndex);
+    const con = diags.find(d => /BRANPROP cannot be used together with GRUPNET/.test(d.message));
+    expect(con).toBeDefined();
+    expect(con!.line).toBe(1);
+  });
+
+  it('does not flag a prohibits conflict when the partner is absent', () => {
+    const lines = ['SCHEDULE', 'BRANPROP', '/', 'GRUPTREE', '/'];
+    const diags = computeDiagnostics(lines, xIndex);
+    expect(diags.some(d => /cannot be used together/.test(d.message))).toBe(false);
+  });
+
+  it('reports a prohibits pair only once even when declared from one side', () => {
+    // THERMAL declares prohibits: [TEMP]; TEMP carries no prohibits field.
+    const lines = ['RUNSPEC', 'THERMAL', 'PROPS', 'TEMP', '0.1 /'];
+    const diags = computeDiagnostics(lines, xIndex);
+    const conflicts = diags.filter(d => /mutually exclusive/.test(d.message));
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].message).toMatch(/THERMAL cannot be used together with TEMP/);
+  });
+
+  it('reports each requirement independently for a multi-requires keyword', () => {
+    const multi: Record<string, AnalysisEntry> = {
+      ...xIndex,
+      NODEPROP: {
+        name: 'NODEPROP',
+        sections: ['SCHEDULE'],
+        size_kind: 'list',
+        requires: ['NETWORK', 'BRANPROP'],
+      },
+    };
+    // NETWORK present, BRANPROP missing → exactly one requires diagnostic.
+    const lines = ['RUNSPEC', 'NETWORK', '5 5 /', 'SCHEDULE', 'NODEPROP', '/'];
+    const diags = computeDiagnostics(lines, multi);
+    const reqs = diags.filter(d => /NODEPROP requires/.test(d.message));
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0].message).toMatch(/requires BRANPROP/);
+  });
+
+  it('keeps quiet for keywords with no constraints', () => {
+    const lines = ['RUNSPEC', 'NETWORK', '5 5 /', 'AQUDIMS', '1 2 /'];
+    const diags = computeDiagnostics(lines, xIndex);
+    expect(diags.some(d => /requires|cannot be used together|mutually exclusive/.test(d.message))).toBe(false);
+  });
+});
+
 describe('computeDiagnostics — TITLE accepts a bare title line', () => {
   const titleIndex: Record<string, AnalysisEntry> = {
     ...index,

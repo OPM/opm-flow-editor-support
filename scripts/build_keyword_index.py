@@ -205,6 +205,14 @@ def load_opm_common_index(keywords_dir: Path) -> dict:
                     # so the build can expand them into recognised entries.
                     "deck_names":       data.get("deck_names"),
                     "deck_name_regex":  data.get("deck_name_regex"),
+                    # Cross-keyword constraints (parser-truth). ``requires`` lists
+                    # keywords that must also appear in the deck; ``prohibits``
+                    # lists keywords that may not co-exist with this one. Both are
+                    # flat lists of canonical keyword names. Surfaced so the
+                    # diagnostics engine can emit "X requires Y" / "X conflicts
+                    # with Y" warnings.
+                    "requires":         data.get("requires"),
+                    "prohibits":        data.get("prohibits"),
                     "comment":          data.get("comment", ""),
                 }
                 total += 1
@@ -354,6 +362,18 @@ def _merge_records_mode(
     return merged, appended
 
 
+def _attach_cross_keyword(entry: dict, opm: dict) -> None:
+    """Copy the ``requires`` / ``prohibits`` lists from an opm-common entry onto
+    *entry* (a manual-shape dict), skipping empty/absent values so keywords
+    without constraints stay free of the fields."""
+    requires = opm.get("requires")
+    if requires:
+        entry["requires"] = list(requires)
+    prohibits = opm.get("prohibits")
+    if prohibits:
+        entry["prohibits"] = list(prohibits)
+
+
 def merge_opm_common(index: dict, opm_common_index: dict) -> None:
     """
     Mutate *index* in place, attaching opm-common authoritative data:
@@ -397,6 +417,10 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
         if size_count is not None:
             for e in entries:
                 e["size_count"] = size_count
+
+        # Cross-keyword constraints — independent of record shape.
+        for e in entries:
+            _attach_cross_keyword(e, opm)
 
         records = opm.get("records")
         if records:
@@ -575,6 +599,7 @@ def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
         size_count = opm.get("size_count")
         if size_count is not None:
             entry["size_count"] = size_count
+        _attach_cross_keyword(entry, opm)
         index[name] = entry
         added += 1
     print(f"Synthesized {added} OPM-only entries")
@@ -1614,6 +1639,12 @@ def write_compact_json(index: dict, output_path: Path):
             out_entry["templated"] = True
         if primary.get("variadic_record"):
             out_entry["variadic_record"] = True
+        requires = primary.get("requires")
+        if requires:
+            out_entry["requires"] = requires
+        prohibits = primary.get("prohibits")
+        if prohibits:
+            out_entry["prohibits"] = prohibits
         compact[name] = out_entry
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(compact, f, separators=(",", ":"), ensure_ascii=False)

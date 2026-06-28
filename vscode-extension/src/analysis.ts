@@ -78,6 +78,18 @@ export interface AnalysisEntry {
    * apply so a forgotten closing '/' still gets flagged.
    */
   optional_body?: boolean;
+  /**
+   * Keywords that must also appear in the deck when this one is used
+   * (opm-common ``requires``). Drives the "X requires Y" diagnostic. The
+   * check is document-wide and is suppressed when the deck pulls in other
+   * files via INCLUDE/IMPORT/GDFILE, since the required keyword may live there.
+   */
+  requires?: string[];
+  /**
+   * Keywords that may not co-exist with this one (opm-common ``prohibits``).
+   * Drives the "X conflicts with Y" diagnostic when both are present.
+   */
+  prohibits?: string[];
 }
 
 export type AnalysisIndex = Record<string, AnalysisEntry>;
@@ -282,6 +294,17 @@ export function computeDiagnostics(
   // deck, the rest pulled in via INCLUDE), so once we've seen one we can no
   // longer trust `currentSection` and must suppress the wrong-section check.
   let includeSinceSection = false;
+  // First occurrence of each recognised keyword (by canonical entry name),
+  // collected during the walk and evaluated once at the end for the
+  // document-wide requires/prohibits constraints.
+  const seenKeywords = new Map<
+    string,
+    { entry: AnalysisEntry; line: number; startChar: number; endChar: number }
+  >();
+  // True once any file-loading keyword (INCLUDE/IMPORT/GDFILE) has appeared
+  // anywhere in the deck. A `requires` partner may live in an included file,
+  // so the missing-requirement check is suppressed when this is set.
+  let hasIncludeKeyword = false;
 
   const closeKw = (): void => {
     if (!activeKw) return;
@@ -499,10 +522,24 @@ export function computeDiagnostics(
           continue;
         }
 
+        // Record the first occurrence of this keyword for the document-wide
+        // requires/prohibits checks. Keyed by the canonical entry name so a
+        // templated deck token (FTPRSEA) maps to its base (FTPR); the range
+        // still points at the literal token in the deck.
+        if (!seenKeywords.has(activeKw.name)) {
+          seenKeywords.set(activeKw.name, {
+            entry: activeKw,
+            line: i,
+            startChar: activeKwIndent,
+            endChar: activeKwIndent + kw.length,
+          });
+        }
+
         // A file-loading keyword may pull in section headers from another
         // file, after which `currentSection` can no longer be trusted.
         if (kw === 'INCLUDE' || kw === 'IMPORT' || kw === 'GDFILE') {
           includeSinceSection = true;
+          hasIncludeKeyword = true;
         }
 
         // Section-validity check. Suppressed once an INCLUDE/IMPORT/GDFILE has
@@ -598,5 +635,44 @@ export function computeDiagnostics(
   }
 
   closeKw();
+
+  // --- Cross-keyword constraints (requires / prohibits) -------------------
+  // Evaluated document-wide once all keyword occurrences are known.
+  const reportedProhibitPairs = new Set<string>();
+  for (const [name, where] of seenKeywords) {
+    const { entry } = where;
+
+    // `requires`: every listed keyword must also be present. Suppressed when
+    // the deck pulls in other files, since the requirement may be satisfied
+    // there.
+    if (entry.requires && !hasIncludeKeyword) {
+      for (const req of entry.requires) {
+        if (seenKeywords.has(req)) continue;
+        out.push({
+          line: where.line,
+          startChar: where.startChar,
+          endChar: where.endChar,
+          message: `${name} requires ${req}, which is not present in the deck.`,
+        });
+      }
+    }
+
+    // `prohibits`: warn once per unordered pair when both are present.
+    if (entry.prohibits) {
+      for (const pro of entry.prohibits) {
+        if (!seenKeywords.has(pro)) continue;
+        const pairKey = name < pro ? `${name} ${pro}` : `${pro} ${name}`;
+        if (reportedProhibitPairs.has(pairKey)) continue;
+        reportedProhibitPairs.add(pairKey);
+        out.push({
+          line: where.line,
+          startChar: where.startChar,
+          endChar: where.endChar,
+          message: `${name} cannot be used together with ${pro}; they are mutually exclusive.`,
+        });
+      }
+    }
+  }
+
   return out;
 }
