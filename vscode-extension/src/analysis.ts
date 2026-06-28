@@ -152,6 +152,29 @@ function isRegionSetVector(index: AnalysisIndex, kw: string): boolean {
   return index[base] !== undefined;
 }
 
+/** True when `base` is an indexed keyword valid in the SUMMARY section. */
+function isSummaryBase(index: AnalysisIndex, base: string): boolean {
+  const e = index[base];
+  return !!e && Array.isArray(e.sections) && e.sections.includes('SUMMARY');
+}
+
+/**
+ * Summary vector formed by a standard modifier on a base vector that is itself
+ * an indexed SUMMARY vector:
+ *   - trailing 'L' — completion/connection-level variant (WOPRL = WOPR + L,
+ *     COPRL = COPR + L);
+ *   - leading 'L' — LGR-local variant (LWWIR = L + WWIR, LBOSAT = L + BOSAT).
+ * Requiring the stripped base to be a real SUMMARY vector keeps this from
+ * masking genuine typos, while covering the open-ended L-modifier families that
+ * opm-common does not enumerate.
+ */
+function isSummaryModifierVector(index: AnalysisIndex, kw: string): boolean {
+  if (kw.length < 4) return false;
+  if (kw.endsWith('L') && isSummaryBase(index, kw.slice(0, -1))) return true;
+  if (kw.startsWith('L') && isSummaryBase(index, kw.slice(1))) return true;
+  return false;
+}
+
 /** Resolve `kw` to an index entry, falling back to a templated-prefix
  *  match when no exact entry exists. Returns the *template's* entry —
  *  callers use it for shape (size_kind, etc.); the displayed keyword
@@ -454,6 +477,9 @@ export function computeDiagnostics(
           // Region summary vectors qualified by a named FIP region set
           // (ROIP_ABC, RPR__ABC) are likewise user-qualified and not indexed.
           if (isRegionSetVector(index, kw)) continue;
+          // Standard L-modifier summary vectors (WOPRL completion-level,
+          // LWWIR LGR-local) built on an indexed SUMMARY base vector.
+          if (isSummaryModifierVector(index, kw)) continue;
           out.push({
             line: i,
             startChar: activeKwIndent,

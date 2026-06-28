@@ -624,6 +624,24 @@ describe('computeDiagnostics — unknown keywords', () => {
     expect(computeDiagnostics(lines, local).some(d => /ROIP_ABC.*not a recognised/.test(d.message))).toBe(false);
   });
 
+  it('does not flag L-modifier summary vectors built on an indexed base', () => {
+    const local = {
+      ...index,
+      WOPR: { name: 'WOPR', sections: ['SUMMARY'] },
+      WWIR: { name: 'WWIR', sections: ['SUMMARY'] },
+    };
+    // WOPRL = WOPR + trailing L (completion-level); LWWIR = leading L + WWIR (LGR-local).
+    const lines = ['SUMMARY', 'WOPRL', 'LWWIR'];
+    expect(computeDiagnostics(lines, local).some(d => /not a recognised/.test(d.message))).toBe(false);
+  });
+
+  it('still flags an L-suffixed token whose stripped base is not a summary vector', () => {
+    // "CONTROL" -> base "CONTRO" is not an indexed SUMMARY vector, so it is
+    // still reported rather than silently accepted.
+    const lines = ['SUMMARY', 'CONTROL'];
+    expect(computeDiagnostics(lines, index).some(d => /CONTROL.*not a recognised/.test(d.message))).toBe(true);
+  });
+
   it('still flags an underscore-suffixed token whose base is not a region vector', () => {
     // WOPR_X: base WOPR is a well (W) vector, not a region (R) vector, so the
     // region-set rule does not apply and the typo is still reported.
