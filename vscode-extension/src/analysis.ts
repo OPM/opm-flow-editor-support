@@ -278,6 +278,10 @@ export function computeDiagnostics(
     const bareOptionalBody = activeKw.optional_body && recordCount === 0;
     const needsTerminator =
       !bareOptionalBody
+      // Variadic-record keywords (VFPPROD, VFPINJ, RSVD, …) have a table-style
+      // final record that is closed by its own per-record '/', not by a
+      // separate standalone list terminator — so they need no closing '/'.
+      && !activeKw.variadic_record
       && (
         (activeKw.size_kind === 'list' && !listTerminatorSeen) ||
         (activeKw.size_kind === 'array' && !arrayTerminatorSeen)

@@ -525,6 +525,23 @@ describe('computeDiagnostics — terminators', () => {
     expect(arrDiag!.endChar).toBe('PORO'.length);
   });
 
+  it('does not require a closing / for a variadic-record list keyword (VFP-style)', () => {
+    // A VFP table is a record list whose final table record is closed by its
+    // own '/', with no separate standalone list terminator.
+    const vfp = {
+      VFPTAB: { name: 'VFPTAB', sections: ['SCHEDULE'], size_kind: 'list' as const, variadic_record: true },
+    };
+    const lines = [
+      'SCHEDULE',
+      'VFPTAB',
+      '1 2249 /',
+      '100 300 600 /',
+      '30 54 /',
+      '1 1 441.2 /',
+    ];
+    expect(computeDiagnostics(lines, vfp).some(d => /close the record list/.test(d.message))).toBe(false);
+  });
+
   it('flags both missing record terminator and missing list terminator', () => {
     const lines = [
       'SCHEDULE',
