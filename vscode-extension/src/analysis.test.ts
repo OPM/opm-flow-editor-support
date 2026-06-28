@@ -581,6 +581,22 @@ describe('computeDiagnostics — unknown keywords', () => {
     expect(diags.some(d => /not a recognised/.test(d.message))).toBe(true);
   });
 
+  it('does not flag region summary vectors qualified by a FIP region-set name', () => {
+    // ROIP (region oil in place) is a region vector; ROIP_ABC adds the named
+    // FIP region set "ABC". The base must exist in the index.
+    const local = { ...index, ROIP: { name: 'ROIP', sections: ['SUMMARY'] } };
+    const lines = ['SUMMARY', 'ROIP_ABC'];
+    expect(computeDiagnostics(lines, local).some(d => /ROIP_ABC.*not a recognised/.test(d.message))).toBe(false);
+  });
+
+  it('still flags an underscore-suffixed token whose base is not a region vector', () => {
+    // WOPR_X: base WOPR is a well (W) vector, not a region (R) vector, so the
+    // region-set rule does not apply and the typo is still reported.
+    const local = { ...index, WOPR: { name: 'WOPR', sections: ['SUMMARY'] } };
+    const lines = ['SUMMARY', 'WOPR_X'];
+    expect(computeDiagnostics(lines, local).some(d => /WOPR_X.*not a recognised/.test(d.message))).toBe(true);
+  });
+
   it('does not flag keywords on the exclusion list', () => {
     // RPTSCHED is excluded — must not be flagged as unknown even though it's
     // absent from the supplied test index.

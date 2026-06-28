@@ -138,6 +138,20 @@ const TEMPLATE_SUFFIX_RE = /^[A-Z0-9]+$/;
  */
 const UDQ_NAME_RE = /^[ABCFGRSW]U[A-Z0-9_]+$/;
 
+/**
+ * Region summary vector qualified by a named FIP region set, e.g. ``ROIP_ABC``
+ * (= base vector ``ROIP`` over region set ``ABC``) or ``RPR__ABC``. The base is
+ * a region vector (``R``-prefixed) that exists in the index; the ``_<NAME>``
+ * qualifier is user-defined so the full token never appears in the index.
+ */
+function isRegionSetVector(index: AnalysisIndex, kw: string): boolean {
+  const us = kw.indexOf('_');
+  if (us <= 0) return false;
+  const base = kw.slice(0, us);
+  if (base[0] !== 'R') return false;
+  return index[base] !== undefined;
+}
+
 /** Resolve `kw` to an index entry, falling back to a templated-prefix
  *  match when no exact entry exists. Returns the *template's* entry —
  *  callers use it for shape (size_kind, etc.); the displayed keyword
@@ -421,6 +435,9 @@ export function computeDiagnostics(
           // shape: they are user-defined and so never appear in the index, but
           // are valid as bare SUMMARY mnemonics and in ACTIONX/UDQ bodies.
           if (UDQ_NAME_RE.test(kw)) continue;
+          // Region summary vectors qualified by a named FIP region set
+          // (ROIP_ABC, RPR__ABC) are likewise user-qualified and not indexed.
+          if (isRegionSetVector(index, kw)) continue;
           out.push({
             line: i,
             startChar: activeKwIndent,
