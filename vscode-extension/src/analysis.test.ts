@@ -502,6 +502,19 @@ describe('computeDiagnostics — unknown keywords', () => {
     expect(computeDiagnostics(lines, index)).toEqual([]);
   });
 
+  it('does not flag user-defined quantity (UDQ) names as unknown', () => {
+    // UDQ names begin with a data-type letter followed by 'U'. They are
+    // user-defined (never in the index) but valid as bare SUMMARY mnemonics.
+    const lines = ['SUMMARY', 'FU_VAR1', 'FU_TIME', 'WU_WBHP', 'GUOPR'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('still flags a typo that does not match the UDQ name shape', () => {
+    const lines = ['RUNSPEC', 'WELSPECZ', '/'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => /not a recognised/.test(d.message))).toBe(true);
+  });
+
   it('does not flag keywords on the exclusion list', () => {
     // RPTSCHED is excluded — must not be flagged as unknown even though it's
     // absent from the supplied test index.

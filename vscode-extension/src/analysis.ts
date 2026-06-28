@@ -128,6 +128,16 @@ function expectsMoreRecords(
  *  match unrelated tokens. */
 const TEMPLATE_SUFFIX_RE = /^[A-Z0-9]+$/;
 
+/**
+ * User-defined quantity (UDQ) name. OPM Flow requires a UDQ name to begin with
+ * the data-type letter (one of A B C F G R S W) followed by the letter ``U``
+ * (e.g. ``WUOPRL``, ``FU_VAR1``, ``WU_WBHP``). Such names are user-defined, so
+ * they can never appear in the keyword index, yet they show up legitimately as
+ * bare SUMMARY mnemonics and inside ACTIONX/UDQ bodies. We recognise them by
+ * shape so the unknown-keyword diagnostic doesn't flag them as typos.
+ */
+const UDQ_NAME_RE = /^[ABCFGRSW]U[A-Z0-9_]+$/;
+
 /** Resolve `kw` to an index entry, falling back to a templated-prefix
  *  match when no exact entry exists. Returns the *template's* entry —
  *  callers use it for shape (size_kind, etc.); the displayed keyword
@@ -363,6 +373,10 @@ export function computeDiagnostics(
         // typo. Flag and stop tracking — there's no parser data to validate the
         // record body against anyway.
         if (!activeKw) {
+          // User-defined quantity names (WUOPRL, FU_VAR1, …) are recognised by
+          // shape: they are user-defined and so never appear in the index, but
+          // are valid as bare SUMMARY mnemonics and in ACTIONX/UDQ bodies.
+          if (UDQ_NAME_RE.test(kw)) continue;
           out.push({
             line: i,
             startChar: activeKwIndent,
