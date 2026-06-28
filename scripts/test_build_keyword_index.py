@@ -34,6 +34,7 @@ from build_keyword_index import (
     load_opm_common_index,
     merge_opm_common,
     synthesize_opm_only_entries,
+    add_directional_variants,
     extract_string_options,
     attach_string_options,
     _opm_item_for_param,
@@ -1374,3 +1375,33 @@ class TestAttachStringOptions:
         assert index["K"]["parameters"][0]["options"] == ["GAS", "OIL", "WAT"]
         assert "options" not in index["K"]["parameters"][1]
         assert "options" not in index["K"]["parameters"][2]  # not STRING
+
+
+class TestAddDirectionalVariants:
+    def test_emits_xyz_copies_for_base_keywords(self):
+        index = {
+            "KRNUM": {"name": "KRNUM", "sections": ["GRID"], "size_kind": "array"},
+        }
+        added = add_directional_variants(index)
+        assert added == 3
+        for suffix in ("X", "Y", "Z"):
+            name = f"KRNUM{suffix}"
+            assert name in index
+            assert index[name]["name"] == name
+            assert index[name]["sections"] == ["GRID"]
+
+    def test_is_a_deep_copy_not_a_shared_reference(self):
+        index = {"IMBNUM": {"name": "IMBNUM", "sections": ["REGIONS"]}}
+        add_directional_variants(index)
+        index["IMBNUMX"]["sections"].append("GRID")
+        assert index["IMBNUM"]["sections"] == ["REGIONS"]
+
+    def test_skips_missing_base_and_preexisting_variant(self):
+        index = {
+            "KRNUM": {"name": "KRNUM", "sections": ["GRID"]},
+            "KRNUMX": {"name": "KRNUMX", "sections": ["GRID"], "custom": True},
+        }
+        added = add_directional_variants(index)
+        # KRNUMX already present (kept untouched); only Y and Z added. IMBNUM absent.
+        assert added == 2
+        assert index["KRNUMX"].get("custom") is True

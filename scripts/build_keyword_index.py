@@ -14,6 +14,7 @@ Each keyword lives in: parts/chapters/subsections/X.3/KEYWORD.fodt
 """
 
 import argparse
+import copy
 import json
 import re
 import sys
@@ -54,6 +55,14 @@ RAW_TEXT_KEYWORDS = frozenset({"TITLE"})
 # followed by up to a five letter character string", producing deck tokens
 # like FIPZON, FIPGL, FIPNL, FIPUNIT, FIPHC, ….
 TEMPLATE_KEYWORD_NAMES = frozenset({"TVDP", "FIP"})
+
+# Region-number keywords that have per-direction Cartesian variants formed by
+# appending X / Y / Z to the base name (KRNUM -> KRNUMX/KRNUMY/KRNUMZ, IMBNUM
+# -> IMBNUMX/...). opm-common defines only the base name, so real decks using
+# the directional forms would otherwise be flagged as unknown keywords. Each
+# variant copies the base entry (same sections / shape / docs).
+DIRECTIONAL_VARIANT_BASES = frozenset({"KRNUM", "IMBNUM"})
+DIRECTIONAL_SUFFIXES = ("X", "Y", "Z")
 
 # Keywords whose record body is conventionally spread across multiple
 # lines, with only the line carrying '/' completing the record. opm-common's
@@ -484,6 +493,29 @@ def attach_string_options(index: dict) -> int:
                 attached += 1
     print(f"Attached options to {attached} STRING parameters")
     return attached
+
+
+def add_directional_variants(index: dict) -> int:
+    """
+    Emit per-direction Cartesian variants (X/Y/Z) for the region-number
+    keywords in DIRECTIONAL_VARIANT_BASES. Each variant is a copy of the base
+    entry with its name updated. Returns the number of variants added.
+    """
+    added = 0
+    for base in DIRECTIONAL_VARIANT_BASES:
+        base_entry = index.get(base)
+        if not base_entry:
+            continue
+        for suffix in DIRECTIONAL_SUFFIXES:
+            name = f"{base}{suffix}"
+            if name in index:
+                continue
+            entry = copy.deepcopy(base_entry)
+            entry["name"] = name
+            index[name] = entry
+            added += 1
+    print(f"Added {added} directional region-keyword variants")
+    return added
 
 
 def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
@@ -1603,6 +1635,7 @@ def main():
         )
         merge_opm_common(index, opm_common_index)
         synthesize_opm_only_entries(index, opm_common_index)
+        add_directional_variants(index)
         attach_string_options(index)
 
     write_json(index, Path(args.output))
