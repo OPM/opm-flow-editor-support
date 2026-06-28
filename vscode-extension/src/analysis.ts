@@ -27,10 +27,30 @@ export interface RecordMeta {
   expected_columns?: number;
 }
 
+/**
+ * Per-parameter shape consumed by the positional type-check. Mirrors the
+ * subset of the compact-index parameter object the diagnostics engine needs;
+ * the full object (description, units, default, …) is ignored here.
+ */
+export interface AnalysisParam {
+  /** 1-based record position, or a grouped string ("3-52") for variadic
+   *  ranges. Only integer positions are type-checked. */
+  index: number | string;
+  name?: string;
+  /** opm-common value type: INT | DOUBLE | STRING | RAW_STRING | UDA. */
+  value_type?: string;
+  /** Enum values for STRING parameters extracted from the manual. */
+  options?: string[];
+  /** 1-based record number for multi-record keywords. */
+  record?: number;
+}
+
 export interface AnalysisEntry {
   name: string;
   expected_columns?: number;
   records_meta?: RecordMeta[];
+  /** Per-parameter metadata used by the positional type-check. */
+  parameters?: AnalysisParam[];
   /** Authoritative section list (from opm-common when available). */
   sections?: string[];
   /**
@@ -231,12 +251,112 @@ function lineHasRecordTerminator(text: string, lastTokenEnd: number): boolean {
   return false;
 }
 
+// --- Positional value-type checking ---------------------------------------
+// Token shapes used to decide whether a record value is well-formed for the
+// parameter's declared opm-common type. Kept deliberately conservative: we
+// only flag values whose form is *unambiguously* wrong, never a bare
+// identifier against a numeric slot (it may be a UDA/UDQ reference or a macro
+// substitution the line-oriented engine cannot resolve).
+const INT_TOKEN_RE = /^[-+]?\d+$/;
+const NUMERIC_TOKEN_RE = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
+
+// Phase keywords that opm-common lists as `requires` targets (SWOF requires
+// OIL + WATER, SGFN requires GAS, …).
+const PHASE_KEYWORDS: ReadonlySet<string> = new Set([
+  'OIL', 'GAS', 'WATER', 'DISGAS', 'VAPOIL', 'VAPWAT', 'DISGASW',
+]);
+
+// Modes that activate a fixed phase set *without* the explicit phase keywords
+// above (CO2STORE = water + gas, H2STORE = water + gas, …). When one of these
+// is present the phase-keyword requirements are satisfied implicitly, so a
+// missing-phase diagnostic would be a false positive.
+const IMPLICIT_PHASE_MODE_KEYWORDS: ReadonlySet<string> = new Set([
+  'CO2STORE', 'CO2STOR', 'H2STORE',
+]);
+
+function isQuotedToken(t: string): boolean {
+  return t.startsWith("'");
+}
+
+function stripQuotes(t: string): string {
+  return isQuotedToken(t) ? t.replace(/^'/, '').replace(/'$/, '') : t;
+}
+
+/**
+ * Locate the parameter occupying 1-based record position `col` within the
+ * active record. Grouped/variadic indices (string form like "3-52") are not
+ * type-checked, so only integer positions match.
+ */
+function paramAtPosition(
+  entry: AnalysisEntry,
+  record: number,
+  col: number,
+): AnalysisParam | undefined {
+  const params = entry.parameters;
+  if (!params) return undefined;
+  const multi = !!entry.records_meta;
+  for (const p of params) {
+    if (multi && (p.record ?? 1) !== record) continue;
+    if (typeof p.index === 'number' && p.index === col) return p;
+  }
+  return undefined;
+}
+
+/**
+ * Return a diagnostic message for a record value that does not match its
+ * parameter's declared type/options, or null when the value is acceptable.
+ * `raw` is the verbatim token (a repeat-value's count prefix already stripped
+ * by the caller; pure defaults are never passed in).
+ */
+function valueTypeError(
+  param: AnalysisParam,
+  raw: string,
+  kwName: string,
+): string | null {
+  const quoted = isQuotedToken(raw);
+  const val = stripQuotes(raw);
+
+  // A blank or whitespace-only token (e.g. `''` or `'   '`) is a placeholder
+  // for a defaulted value — never a type error.
+  if (val.trim() === '') return null;
+
+  // NB: an enum (`options[]`) mismatch is deliberately NOT flagged. The option
+  // sets are extracted heuristically from the manual prose and are frequently
+  // incomplete or abbreviated (e.g. WCONINJE's phase lists "WAT" rather than
+  // the valid "WATER"), so flagging values outside the set produced thousands
+  // of false positives on the known-good opm-tests corpus. Options remain in
+  // the index for *completions*, where being incomplete is harmless.
+
+  switch (param.value_type) {
+    case 'INT':
+      if (quoted) {
+        return `${kwName}: ${param.name ?? 'value'} expects an integer; got a quoted string.`;
+      }
+      if (INT_TOKEN_RE.test(val)) return null;
+      if (NUMERIC_TOKEN_RE.test(val)) {
+        return `${kwName}: ${param.name ?? 'value'} expects an integer; got '${val}'.`;
+      }
+      return null; // bare names left alone (UDA/UDQ/macro)
+    case 'DOUBLE':
+      if (quoted) {
+        return `${kwName}: ${param.name ?? 'value'} expects a number; got a quoted string.`;
+      }
+      return null; // numeric ok; bare names left alone
+    default:
+      return null; // STRING / RAW_STRING / UDA / unknown: accept any token
+  }
+}
+
 /**
  * Walk a document and emit line-level diagnostics:
  *
  * - **Arity**: a record with more values than the keyword's per-record
  *   item count (from opm-common). Too-few values are not flagged because
  *   OPM Flow auto-defaults trailing positions before the `/`.
+ * - **Value type**: a record value whose form is unambiguously wrong for the
+ *   matching item's declared `value_type` (a quoted string in a numeric slot,
+ *   a decimal in an `INT` slot) or, for `STRING` items with an `options[]`
+ *   set, a value outside that set. Defaults (`*`, `N*`) are always accepted.
  * - **Section validity**: a keyword whose authoritative `sections` list
  *   does not include the section currently in scope.
  * - **Record terminator**: a record line that has values but is missing
@@ -305,6 +425,11 @@ export function computeDiagnostics(
   // anywhere in the deck. A `requires` partner may live in an included file,
   // so the missing-requirement check is suppressed when this is set.
   let hasIncludeKeyword = false;
+  // True once any section header has appeared. The `requires` check only
+  // makes sense on a complete deck; an INCLUDE *fragment* (a bare .inc/.grdecl
+  // with no section header) legitimately omits the RUNSPEC phase keywords its
+  // tables "require", so the check is suppressed when no section is present.
+  let sawSectionHeader = false;
 
   const closeKw = (): void => {
     if (!activeKw) return;
@@ -409,6 +534,7 @@ export function computeDiagnostics(
       }
       closeKw();
       currentSection = section.name;
+      sawSectionHeader = true;
       includeSinceSection = false;
       continue;
     }
@@ -602,6 +728,31 @@ export function computeDiagnostics(
       }
     }
 
+    // Positional value-type check. Each token is validated against the
+    // matching item's declared type (and options set). Skipped for
+    // variadic-record keywords (table data with a single ALL-arity item, no
+    // meaningful per-position types) and for keywords lacking parameter data.
+    if (activeKw.parameters?.length && !activeKw.variadic_record) {
+      let col = 1;
+      for (const tok of tokens) {
+        const repeat = tok.text.match(/^(\d+)\*(.*)$/);
+        const pureDefault = tok.text === '*' || (repeat !== null && repeat[2] === '');
+        if (!pureDefault) {
+          // For a repeat-value token (N*VALUE) check the repeated VALUE
+          // against the parameter at the run's first position.
+          const valueText = repeat ? repeat[2] : tok.text;
+          const param = paramAtPosition(activeKw, currentRecord, col);
+          if (param) {
+            const msg = valueTypeError(param, valueText, activeKw.name);
+            if (msg) {
+              out.push({ line: i, startChar: tok.start, endChar: tok.end, message: msg });
+            }
+          }
+        }
+        col += tok.columnCount;
+      }
+    }
+
     // Record terminator tracking. OPM Flow allows a record's '/' to appear on a
     // later line, so we don't flag a missing terminator here — we mark the
     // record "open" and let the standalone-'/' handler close it, or closeKw
@@ -639,15 +790,23 @@ export function computeDiagnostics(
   // --- Cross-keyword constraints (requires / prohibits) -------------------
   // Evaluated document-wide once all keyword occurrences are known.
   const reportedProhibitPairs = new Set<string>();
+  let hasImplicitPhaseMode = false;
+  for (const k of IMPLICIT_PHASE_MODE_KEYWORDS) {
+    if (seenKeywords.has(k)) { hasImplicitPhaseMode = true; break; }
+  }
   for (const [name, where] of seenKeywords) {
     const { entry } = where;
 
     // `requires`: every listed keyword must also be present. Suppressed when
-    // the deck pulls in other files, since the requirement may be satisfied
-    // there.
-    if (entry.requires && !hasIncludeKeyword) {
+    // the deck pulls in other files (the requirement may be satisfied there)
+    // or when the input has no section header (an INCLUDE fragment, not a
+    // complete deck).
+    if (entry.requires && !hasIncludeKeyword && sawSectionHeader) {
       for (const req of entry.requires) {
         if (seenKeywords.has(req)) continue;
+        // A phase requirement is satisfied implicitly under CO2STORE/H2STORE
+        // and similar modes, which set the phases without the phase keyword.
+        if (hasImplicitPhaseMode && PHASE_KEYWORDS.has(req)) continue;
         out.push({
           line: where.line,
           startChar: where.startChar,

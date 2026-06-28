@@ -1377,6 +1377,174 @@ describe('computeDiagnostics — TUNING (issue #12)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Positional value-type checking (plan item 2)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — positional value types', () => {
+  const typedIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    // Four INT positions (ACTDIMS-shaped).
+    ACTDIMS: {
+      name: 'ACTDIMS',
+      sections: ['RUNSPEC'],
+      size_kind: 'fixed',
+      expected_columns: 4,
+      parameters: [
+        { index: 1, name: 'MAX_ACTION', value_type: 'INT' },
+        { index: 2, name: 'MAX_LINES', value_type: 'INT' },
+        { index: 3, name: 'MAX_COND', value_type: 'INT' },
+        { index: 4, name: 'MAX_CHAR', value_type: 'INT' },
+      ],
+    },
+    // Mixed STRING / INT / enum / DOUBLE positions (COMPDAT-shaped; only a
+    // few positions carry a parameter so unmapped columns are skipped).
+    COMPDAT: {
+      name: 'COMPDAT',
+      sections: ['SCHEDULE'],
+      size_kind: 'list',
+      parameters: [
+        { index: 1, name: 'WELL', value_type: 'STRING' },
+        { index: 2, name: 'I', value_type: 'INT' },
+        { index: 3, name: 'J', value_type: 'INT' },
+        { index: 6, name: 'STATUS', value_type: 'STRING', options: ['OPEN', 'SHUT', 'AUTO'] },
+        { index: 8, name: 'CF', value_type: 'DOUBLE' },
+      ],
+    },
+  };
+
+  it('flags a decimal in an INT slot', () => {
+    const lines = ['RUNSPEC', 'ACTDIMS', '1 2.5 3 4 /'];
+    const diags = computeDiagnostics(lines, typedIndex);
+    const d = diags.find(x => /MAX_LINES expects an integer/.test(x.message));
+    expect(d).toBeDefined();
+    expect(d!.line).toBe(2);
+    expect(d!.startChar).toBe('1 '.length);
+    expect(d!.endChar).toBe('1 2.5'.length);
+  });
+
+  it('flags a quoted string in an INT slot', () => {
+    const lines = ['RUNSPEC', 'ACTDIMS', "1 'X' 3 4 /"];
+    const diags = computeDiagnostics(lines, typedIndex);
+    expect(diags.some(x => /MAX_LINES expects an integer; got a quoted string/.test(x.message))).toBe(true);
+  });
+
+  it('accepts integers and defaults in INT slots', () => {
+    const lines = ['RUNSPEC', 'ACTDIMS', '1 1* 3 4 /'];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+
+  it('accepts a repeat-value with an integer value', () => {
+    // 2*3 fills positions 1-2 with the integer 3.
+    const lines = ['RUNSPEC', 'ACTDIMS', '2*3 1 4 /'];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+
+  it('flags a repeat-value whose value is a decimal in an INT slot', () => {
+    const lines = ['RUNSPEC', 'ACTDIMS', '2*2.5 1 4 /'];
+    const diags = computeDiagnostics(lines, typedIndex);
+    expect(diags.some(x => /expects an integer; got '2.5'/.test(x.message))).toBe(true);
+  });
+
+  it('does not flag enum values against a (heuristic) option set', () => {
+    // The option sets are extracted from manual prose and are often
+    // incomplete/abbreviated, so enum mismatches are deliberately NOT
+    // diagnosed — even an obvious typo like OPNE is left alone.
+    const lines = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPNE 1* 100.0 /", '/'];
+    expect(computeDiagnostics(lines, typedIndex).some(x => /OPNE/.test(x.message))).toBe(false);
+  });
+
+  it('accepts string values (bare or quoted) in STRING slots', () => {
+    const bare = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPEN 1* 100.0 /", '/'];
+    const quoted = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* 'SHUT' 1* 100.0 /", '/'];
+    expect(computeDiagnostics(bare, typedIndex)).toEqual([]);
+    expect(computeDiagnostics(quoted, typedIndex)).toEqual([]);
+  });
+
+  it('treats a blank quoted token as a default, not a type error', () => {
+    // `''` / `'  '` are placeholder defaults — must not trip the numeric check.
+    const lines = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPEN 1* '  ' /", '/'];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+
+  it('flags a quoted string in a DOUBLE slot', () => {
+    const lines = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPEN 1* 'x' /", '/'];
+    const diags = computeDiagnostics(lines, typedIndex);
+    expect(diags.some(x => /CF expects a number; got a quoted string/.test(x.message))).toBe(true);
+  });
+
+  it('accepts a numeric (incl. scientific) DOUBLE value', () => {
+    const lines = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPEN 1* 1.5e-3 /", '/'];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+
+  it('leaves a bare identifier (UDA/UDQ) in a DOUBLE slot alone', () => {
+    // A DOUBLE position may carry a UDA reference name the engine cannot
+    // resolve — these must not be flagged.
+    const lines = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPEN 1* WULPR /", '/'];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+
+  it('does not type-check columns beyond the mapped parameters', () => {
+    // ACTDIMS has 4 INT params; a 5th value is an arity overflow, not a
+    // type error (no parameter maps to column 5).
+    const lines = ['RUNSPEC', 'ACTDIMS', '1 2 3 4 5 /'];
+    const diags = computeDiagnostics(lines, typedIndex);
+    expect(diags.some(x => /expects an integer/.test(x.message))).toBe(false);
+    expect(diags.some(x => /expected at most 4/.test(x.message))).toBe(true);
+  });
+
+  it('uses the matching record for multi-record keywords', () => {
+    const multi: Record<string, AnalysisEntry> = {
+      ...typedIndex,
+      WELSEGS: {
+        name: 'WELSEGS',
+        sections: ['SCHEDULE'],
+        size_kind: 'list',
+        records_meta: [{ expected_columns: 2 }, { expected_columns: 2 }],
+        parameters: [
+          { index: 1, record: 1, name: 'WELL', value_type: 'STRING' },
+          { index: 2, record: 1, name: 'TOPDEP', value_type: 'DOUBLE' },
+          { index: 1, record: 2, name: 'SEG1', value_type: 'INT' },
+          { index: 2, record: 2, name: 'SEG2', value_type: 'INT' },
+        ],
+      },
+    };
+    // Record 1 col 2 is DOUBLE (1234.5 ok); record 2 col 1 is INT, given a
+    // decimal → flagged against the record-2 parameter, not record-1's.
+    const lines = [
+      'SCHEDULE',
+      'WELSEGS',
+      "'W1' 1234.5 /",
+      '2.5 3 /',
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, multi);
+    expect(diags.some(x => /SEG1 expects an integer; got '2.5'/.test(x.message))).toBe(true);
+    expect(diags.some(x => /TOPDEP/.test(x.message))).toBe(false);
+  });
+
+  it('skips type checks for variadic-record keywords', () => {
+    const variadic: Record<string, AnalysisEntry> = {
+      ...typedIndex,
+      RSVD: {
+        name: 'RSVD',
+        sections: ['SOLUTION'],
+        size_kind: 'fixed',
+        variadic_record: true,
+        parameters: [{ index: 1, name: 'DATA', value_type: 'DOUBLE' }],
+      },
+    };
+    const lines = ['SOLUTION', 'RSVD', " 'oops' 156.3 /"];
+    expect(computeDiagnostics(lines, variadic).some(x => /expects a number/.test(x.message))).toBe(false);
+  });
+
+  it('skips keywords without parameter data', () => {
+    const lines = ['RUNSPEC', 'BARE', "1 2.5 'x' /"];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Cross-keyword constraints — requires / prohibits (plan item 1)
 // ---------------------------------------------------------------------------
 
@@ -1425,6 +1593,14 @@ describe('computeDiagnostics — requires / prohibits', () => {
     expect(diags.some(d => /requires NETWORK/.test(d.message))).toBe(false);
   });
 
+  it('suppresses the requires check for a fragment with no section header', () => {
+    // A bare SCAL/grid include (no RUNSPEC header) legitimately omits the
+    // phase keywords its tables "require"; flagging them would be noise.
+    const lines = ['BRANPROP', '/'];
+    const diags = computeDiagnostics(lines, xIndex);
+    expect(diags.some(d => /requires NETWORK/.test(d.message))).toBe(false);
+  });
+
   it('suppresses the requires check when the deck pulls in an INCLUDE file', () => {
     // NETWORK may be defined in the included file, so don't cry wolf.
     const lines = [
@@ -1448,6 +1624,31 @@ describe('computeDiagnostics — requires / prohibits', () => {
     expect(req).toBeDefined();
     expect(req!.startChar).toBe(2);
     expect(req!.endChar).toBe(2 + 'BRANPROP'.length);
+  });
+
+  it('suppresses phase requirements under an implicit-phase mode (CO2STORE)', () => {
+    // CO2STORE activates water+gas without the explicit WATER/GAS keywords,
+    // so SWFN's "requires WATER" must not fire (regression: co2store deck).
+    const co2: Record<string, AnalysisEntry> = {
+      ...xIndex,
+      CO2STORE: { name: 'CO2STORE', sections: ['RUNSPEC'], size_kind: 'none' },
+      SWFN: { name: 'SWFN', sections: ['PROPS'], size_kind: 'list', requires: ['WATER'] },
+      WATER: { name: 'WATER', sections: ['RUNSPEC'], size_kind: 'none' },
+    };
+    const lines = ['RUNSPEC', 'CO2STORE', 'PROPS', 'SWFN', "0.1 0.0 /", '/'];
+    const diags = computeDiagnostics(lines, co2);
+    expect(diags.some(d => /requires WATER/.test(d.message))).toBe(false);
+  });
+
+  it('still flags a phase requirement when no implicit-phase mode is present', () => {
+    const plain: Record<string, AnalysisEntry> = {
+      ...xIndex,
+      SWFN: { name: 'SWFN', sections: ['PROPS'], size_kind: 'list', requires: ['WATER'] },
+      WATER: { name: 'WATER', sections: ['RUNSPEC'], size_kind: 'none' },
+    };
+    const lines = ['PROPS', 'SWFN', '0.1 0.0 /', '/'];
+    const diags = computeDiagnostics(lines, plain);
+    expect(diags.some(d => /SWFN requires WATER/.test(d.message))).toBe(true);
   });
 
   it('flags a prohibits conflict when both keywords are present', () => {
