@@ -400,9 +400,21 @@ export function computeDiagnostics(
       const entry = lookupEntry(index, kw);
       const treatAsRecord =
         activeKw !== null
-        && (!entry || indent > 0)
         && !excludedKeywords.has(kw)
-        && expectsMoreRecords(activeKw, recordCount, listTerminatorSeen, arrayTerminatorSeen);
+        && (
+          // An indented token that is not a known keyword cannot be a keyword
+          // at all (OPM only recognises keywords in column 1), so it is record
+          // body of the active block — e.g. a single well name '  PROD2 /'
+          // under a SUMMARY vector that does not "expect more records". Without
+          // this it would be mis-flagged as an unknown keyword.
+          (indent > 0 && !entry)
+          // Otherwise a single uppercase token continues the block as an
+          // unquoted string value only while it still expects records: a
+          // column-1 unknown token, or an indented token whose name happens to
+          // match a keyword (THPRES under EQLOPTS).
+          || ((!entry || indent > 0)
+              && expectsMoreRecords(activeKw, recordCount, listTerminatorSeen, arrayTerminatorSeen))
+        );
 
       if (!treatAsRecord) {
         closeKw();

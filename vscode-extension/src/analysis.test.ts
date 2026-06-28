@@ -585,6 +585,24 @@ describe('computeDiagnostics — unknown keywords', () => {
     expect(computeDiagnostics(lines, index)).toEqual([]);
   });
 
+  it('does not flag an indented well-name body under a SUMMARY vector as unknown', () => {
+    // A SUMMARY well vector takes a list of well names; when a single name sits
+    // on its own indented line ('  PROD2 /') it must be read as body content,
+    // not mistaken for an unknown keyword.
+    const local = {
+      ...index,
+      SOFR: { name: 'SOFR', sections: ['SUMMARY'], optional_body: true },
+    };
+    const lines = ['SUMMARY', 'SOFR', '  PROD1 /', '  PROD2 /', '/'];
+    expect(computeDiagnostics(lines, local).some(d => /not a recognised/.test(d.message))).toBe(false);
+  });
+
+  it('still flags an indented unknown token when no keyword block is active', () => {
+    const lines = ['RUNSPEC', '   FOOBAR'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => /FOOBAR is not a recognised/.test(d.message))).toBe(true);
+  });
+
   it('does not flag user-defined quantity (UDQ) names as unknown', () => {
     // UDQ names begin with a data-type letter followed by 'U'. They are
     // user-defined (never in the index) but valid as bare SUMMARY mnemonics.
