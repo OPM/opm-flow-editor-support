@@ -559,6 +559,17 @@ def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
     for name, opm in opm_common_index.items():
         if name in index:
             continue
+        if opm.get("deck_names"):
+            # Alias/family container: an opm-common schema name (WELL_PROBE,
+            # AQUIFER_PROBE_ANALYTIC, ENDPOINT_SPECIFIERS, MULT_XYZ, …) whose
+            # real deck keywords are listed in ``deck_names`` and are emitted
+            # separately by ``expand_probe_deck_names``. The container name
+            # itself is never typed in a deck, so don't synthesize it as a
+            # keyword (it would otherwise pollute completions and be wrongly
+            # accepted as valid). Real keywords that happen to carry deck_names
+            # (KRNUM, IMBNUM, DIFF, NEXTSTEP) already have a reference-manual
+            # entry, so they were skipped by the ``name in index`` guard above.
+            continue
         sections = list(opm["sections"])
         records = opm.get("records")
         items = opm["items"]
@@ -622,8 +633,15 @@ def expand_probe_deck_names(index: dict, opm_common_index: dict) -> int:
     (WELL_PROBE, FIELD_PROBE, BLOCK_PROBE, …) into individual recognised
     entries. Each is a minimal entry (name, sections, one-line summary) with no
     size shape, so it is recognised by the diagnostics engine without triggering
-    arity or terminator checks. Existing entries (e.g. WOPR from the manual) are
-    left untouched. Returns the number of entries added.
+    arity or terminator checks.
+
+    Every expanded mnemonic is tagged with ``alias_of`` naming the family
+    keyword it belongs to (WOPR -> WELL_PROBE, KRNUMX -> KRNUM), so hover/docs
+    can surface the relationship. A mnemonic that already exists (e.g. WOPR from
+    the manual SUMMARY table, or KRNUMX from the directional-variant expansion)
+    keeps its richer fields and only gains the ``alias_of`` tag. Returns the
+    number of entries added (pre-existing entries that were merely tagged are
+    not counted).
     """
     added = 0
     for probe_name, opm in opm_common_index.items():
@@ -633,7 +651,20 @@ def expand_probe_deck_names(index: dict, opm_common_index: dict) -> int:
         sections = list(opm.get("sections", []))
         summary = _probe_summary(opm.get("comment", ""), probe_name)
         for dn in deck_names:
-            if not dn or dn in index:
+            if not dn or dn == probe_name:
+                # Some real keywords (IMBNUM, NEXTSTEP) list their own name in
+                # deck_names alongside their variants; a keyword is not an alias
+                # of itself, so skip the self-reference.
+                continue
+            existing = index.get(dn)
+            if existing is not None:
+                # Already present from the manual or directional expansion;
+                # record the family it aliases without clobbering its fields.
+                # Index values may be a list (multi-section manual entry) or a
+                # plain dict; tag the primary entry. First family wins, which
+                # is deterministic in opm-common's stable load order.
+                primary = existing[0] if isinstance(existing, list) else existing
+                primary.setdefault("alias_of", probe_name)
                 continue
             index[dn] = {
                 "name":         dn,
@@ -646,6 +677,7 @@ def expand_probe_deck_names(index: dict, opm_common_index: dict) -> int:
                 "examples":     [],
                 "full_text":    "",
                 "source_file":  "",
+                "alias_of":     probe_name,
             }
             added += 1
     print(f"Expanded {added} summary-vector deck names")
@@ -1645,6 +1677,9 @@ def write_compact_json(index: dict, output_path: Path):
         prohibits = primary.get("prohibits")
         if prohibits:
             out_entry["prohibits"] = prohibits
+        alias_of = primary.get("alias_of")
+        if alias_of:
+            out_entry["alias_of"] = alias_of
         compact[name] = out_entry
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(compact, f, separators=(",", ":"), ensure_ascii=False)

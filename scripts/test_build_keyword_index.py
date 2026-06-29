@@ -1042,6 +1042,28 @@ class TestSynthesizeOpmOnly:
         assert e["parameters"][1]["default"] == "1"
         assert "OPM Flow keyword" in e["summary"]
 
+    def test_alias_family_containers_are_not_synthesized(self):
+        # opm-common schema names that carry deck_names (PROBE families,
+        # ENDPOINT_SPECIFIERS, MULT_XYZ, …) are not deck keywords themselves;
+        # their deck_names are expanded separately. They must not be added as
+        # standalone keywords (else they pollute completions / pass as valid).
+        index: dict = {}
+        opm = {
+            "WELL_PROBE": {
+                "sections": ["SUMMARY"],
+                "items": [],
+                "deck_names": ["WOPR", "WWIP"],
+            },
+            "PYACTION": {  # a normal OPM-only keyword, no deck_names
+                "sections": ["SCHEDULE"],
+                "items": [{"name": "FILE", "value_type": "STRING"}],
+            },
+        }
+        added = synthesize_opm_only_entries(index, opm)
+        assert added == 1
+        assert "WELL_PROBE" not in index
+        assert "PYACTION" in index
+
     def test_already_present_keywords_are_left_alone(self):
         index = {"EXISTING": {"name": "EXISTING", "summary": "kept"}}
         opm = {"EXISTING": {"sections": ["RUNSPEC"], "items": []}}
@@ -1480,6 +1502,8 @@ class TestExpandProbeDeckNames:
         assert index["WWIP"]["name"] == "WWIP"
         assert index["WWIP"]["sections_opm"] == ["SUMMARY"]
         assert index["WWIP"]["summary"] == "Well summary vectors."
+        # Each expanded mnemonic is tagged with the family it derives from.
+        assert index["WWIP"]["alias_of"] == "WELL_PROBE"
         # No size shape -> no terminator/arity checks downstream.
         assert "size_kind" not in index["WWIP"]
 
@@ -1489,6 +1513,35 @@ class TestExpandProbeDeckNames:
         added = expand_probe_deck_names(index, opm)
         assert added == 1
         assert index["WOPR"]["summary"] == "from manual"
+        # A pre-existing mnemonic keeps its richer fields but still gains the
+        # alias tag so hover can show the family relationship.
+        assert index["WOPR"]["alias_of"] == "WELL_PROBE"
+
+    def test_tags_existing_list_valued_entry(self):
+        # Multi-section manual entries are stored as a list of dicts; the
+        # primary (first) entry must receive the alias tag without error.
+        index = {"WOPR": [{"name": "WOPR", "summary": "from manual"}]}
+        opm = {"WELL_PROBE": {"sections": ["SUMMARY"], "deck_names": ["WOPR"]}}
+        added = expand_probe_deck_names(index, opm)
+        assert added == 0
+        assert index["WOPR"][0]["alias_of"] == "WELL_PROBE"
+
+    def test_self_referential_deck_name_is_not_tagged(self):
+        # IMBNUM/NEXTSTEP list their own name in deck_names; a keyword must not
+        # be marked as an alias of itself.
+        index = {"IMBNUM": {"name": "IMBNUM", "summary": "real keyword"}}
+        opm = {"IMBNUM": {"sections": ["REGIONS"],
+                          "deck_names": ["IMBNUM", "IMBNUMX", "IMBNUMY"]}}
+        expand_probe_deck_names(index, opm)
+        assert "alias_of" not in index["IMBNUM"]
+        assert index["IMBNUMX"]["alias_of"] == "IMBNUM"
+
+    def test_existing_alias_tag_is_not_overwritten(self):
+        # First family wins when a mnemonic is claimed by more than one family.
+        index = {"WOPR": {"name": "WOPR", "alias_of": "ALREADY"}}
+        opm = {"WELL_PROBE": {"sections": ["SUMMARY"], "deck_names": ["WOPR"]}}
+        expand_probe_deck_names(index, opm)
+        assert index["WOPR"]["alias_of"] == "ALREADY"
 
     def test_collect_deck_name_regexes_dedupes(self):
         opm = {

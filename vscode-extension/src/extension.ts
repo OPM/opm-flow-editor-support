@@ -69,6 +69,13 @@ interface KeywordEntry {
    * when the literal token isn't in the index.
    */
   templated?: boolean;
+  /**
+   * Deck-name alias: the opm-common family/keyword this mnemonic belongs to
+   * (WOPR -> WELL_PROBE, KRNUMX -> KRNUM). Surfaced in hover so the user sees
+   * which keyword family a concrete summary vector or directional variant
+   * derives from.
+   */
+  alias_of?: string;
 }
 
 type KeywordIndex = Record<string, KeywordEntry>;
@@ -594,6 +601,9 @@ function buildKeywordHover(
   const sectionLabel = entry.sections.length ? ` — ${entry.sections.join(', ')}` : '';
   md.appendMarkdown(`## \`${entry.name}\`${sectionLabel}\n\n`);
   if (entry.summary) md.appendMarkdown(`${entry.summary}\n\n`);
+  if (entry.alias_of) {
+    md.appendMarkdown(`*Deck-name alias of \`${entry.alias_of}\`.*\n\n`);
+  }
   appendParameterTable(md, entry.parameters, getDocColumns());
   if (entry.example) md.appendMarkdown(`**Example**\n\`\`\`\n${entry.example}\n\`\`\`\n`);
   return md;

@@ -69,6 +69,11 @@ Hovering over a **value in a data record** shows the description for that specif
 parameter column. For example, hovering over the group name in a `WELSPECS` record
 shows the `GRPNAME` parameter description, units, and default.
 
+For a summary vector or array variant that derives from an `opm-common` keyword
+family — e.g. `WOPR` (from `WELL_PROBE`) or `KRNUMX` (from `KRNUM`) — the hover
+adds a *Deck-name alias of `<family>`* line, so you can see which keyword family
+the concrete name belongs to.
+
 Keywords on the diagnostics exclusion list (see `opm-flow.diagnostics.excludedKeywords`
 under [Settings](#settings)) carry an extra notice in the hover indicating that
 arity, terminator, and section checks are skipped — useful when squiggles are
@@ -383,6 +388,12 @@ The language is registered as `opm-flow`.
     supply the section header.
   - An indented unknown token under an active keyword is treated as record body
     rather than flagged as an unknown keyword.
+- **Deck-name alias resolution** — concrete summary vectors and directional
+  array variants now record which `opm-common` keyword family they derive from
+  (e.g. `WOPR` → `WELL_PROBE`, `KRNUMX` → `KRNUM`) and surface it in hover. The
+  31 family/container schema names themselves (`WELL_PROBE`,
+  `AQUIFER_PROBE_ANALYTIC`, `MULT_XYZ`, …) are no longer offered as completions
+  or accepted as valid keywords, since they are never typed in a deck.
 
 ### 0.8.0
 
