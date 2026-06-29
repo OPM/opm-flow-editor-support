@@ -157,6 +157,66 @@ def _classify_size(opm_data: dict) -> tuple[str, Optional[int]]:
     return "none", 0
 
 
+def _sanitize_lax_json(text: str) -> str:
+    """Rewrite the non-strict JSON a handful of opm-common keyword files use
+    into something Python's strict ``json`` accepts. opm-common ships these
+    through its own lenient C++ parser, so two constructs slip in:
+
+    * multi-line ``"comment"`` strings containing raw newlines/tabs (e.g.
+      ROCK, MAPAXES) — control chars are illegal inside JSON strings;
+    * number literals with no digit after the decimal point, like
+      ``1.e-01`` in NETBALAN — JSON requires ``1.0e-01``.
+
+    A single left-to-right scan tracks whether we're inside a string so the
+    two fixes never interfere: control chars are escaped only inside strings,
+    and the ``.`` -> ``.0`` fix is applied only outside them (in JSON a bare
+    ``.`` can only occur within a number).
+    """
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    ctrl_map = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+    n = len(text)
+    for i, ch in enumerate(text):
+        if in_string:
+            if escaped:
+                out.append(ch)
+                escaped = False
+            elif ch == "\\":
+                out.append(ch)
+                escaped = True
+            elif ch == '"':
+                out.append(ch)
+                in_string = False
+            elif ord(ch) < 0x20:
+                out.append(ctrl_map.get(ch, "\\u%04x" % ord(ch)))
+            else:
+                out.append(ch)
+        elif ch == '"':
+            in_string = True
+            out.append(ch)
+        elif ch == "." and i + 1 < n and text[i + 1] in "eE":
+            # 1.e-01 -> 1.0e-01
+            out.append(".0")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _load_keyword_json(kw_file: Path) -> Optional[dict]:
+    """Read one opm-common keyword file, tolerating the lenient JSON a few
+    upstream files use. Returns the parsed dict, ``None`` for an empty file
+    (e.g. REACACT, a placeholder), and re-raises only if even the sanitized
+    text fails to parse."""
+    text = kw_file.read_text(encoding="utf-8")
+    if not text.strip():
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(_sanitize_lax_json(text))
+
+
 def load_opm_common_index(keywords_dir: Path) -> dict:
     """
     Walk the opm-common keywords tree and return a dict keyed by keyword name.
@@ -179,10 +239,11 @@ def load_opm_common_index(keywords_dir: Path) -> dict:
                 if not kw_file.is_file():
                     continue
                 try:
-                    with open(kw_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
+                    data = _load_keyword_json(kw_file)
                 except (OSError, json.JSONDecodeError) as e:
                     print(f"  WARNING: failed to read {kw_file}: {e}", file=sys.stderr)
+                    continue
+                if data is None:  # empty placeholder file
                     continue
                 name = data.get("name") or kw_file.name
                 if name in out:

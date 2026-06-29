@@ -41,6 +41,8 @@ from build_keyword_index import (
     attach_string_options,
     _opm_item_for_param,
     _classify_size,
+    _sanitize_lax_json,
+    _load_keyword_json,
     _summary_size_shape,
     _summary_optional_body,
     NS,
@@ -684,6 +686,75 @@ class TestLoadOpmCommonIndex:
         idx = load_opm_common_index(tmp_path)
         assert idx["TITLE"]["size_kind"] == "none"
         assert idx["TITLE"]["size_count"] is None
+
+    def test_multiline_comment_is_loaded(self, tmp_path):
+        # ROCK / MAPAXES ship a "comment" with raw newlines, which strict
+        # JSON rejects. The lenient loader should still pick the keyword up.
+        d = tmp_path / "000_Eclipse100" / "R"
+        d.mkdir(parents=True)
+        (d / "ROCK").write_text(
+            '{\n  "name": "ROCK",\n  "sections": ["PROPS"],\n'
+            '  "comment" : "\nline one\nline two\n",\n  "items": []\n}\n',
+            encoding="utf-8",
+        )
+        idx = load_opm_common_index(tmp_path)
+        assert "ROCK" in idx
+        assert idx["ROCK"]["sections"] == ["PROPS"]
+
+    def test_lax_number_literal_is_loaded(self, tmp_path):
+        # NETBALAN uses 1.e-01, which JSON requires written as 1.0e-01.
+        d = tmp_path / "000_Eclipse100" / "N"
+        d.mkdir(parents=True)
+        (d / "NETBALAN").write_text(
+            '{ "name": "NETBALAN", "sections": ["SCHEDULE"],'
+            ' "items": [{ "name": "LIMIT", "value_type": "DOUBLE",'
+            ' "default": 1.e-01 }] }',
+            encoding="utf-8",
+        )
+        idx = load_opm_common_index(tmp_path)
+        assert "NETBALAN" in idx
+        assert idx["NETBALAN"]["items"][0]["default"] == 0.1
+
+    def test_empty_file_is_skipped_without_error(self, tmp_path):
+        # REACACT is an empty placeholder file; it should drop out quietly.
+        d = tmp_path / "000_Eclipse100" / "R"
+        d.mkdir(parents=True)
+        (d / "REACACT").write_text("", encoding="utf-8")
+        idx = load_opm_common_index(tmp_path)
+        assert idx == {}
+
+
+class TestSanitizeLaxJson:
+    def test_escapes_control_chars_inside_strings(self):
+        out = _sanitize_lax_json('{ "c": "a\nb\tc" }')
+        assert json.loads(out)["c"] == "a\nb\tc"
+
+    def test_fixes_decimal_without_trailing_digit(self):
+        assert json.loads(_sanitize_lax_json('{ "v": 1.e-01 }'))["v"] == 0.1
+
+    def test_leaves_dot_inside_strings_alone(self):
+        # A literal ".e" sequence inside a string must not be rewritten.
+        out = _sanitize_lax_json('{ "c": "see 1.e-01 here", "v": 2.e0 }')
+        data = json.loads(out)
+        assert data["c"] == "see 1.e-01 here"
+        assert data["v"] == 2.0
+
+    def test_well_formed_json_is_unchanged(self):
+        src = '{ "a": 1, "b": [1.5, 2.0], "c": "x" }'
+        assert json.loads(_sanitize_lax_json(src)) == json.loads(src)
+
+
+class TestLoadKeywordJson:
+    def test_empty_file_returns_none(self, tmp_path):
+        p = tmp_path / "EMPTY"
+        p.write_text("   \n", encoding="utf-8")
+        assert _load_keyword_json(p) is None
+
+    def test_truly_broken_json_still_raises(self, tmp_path):
+        p = tmp_path / "BAD"
+        p.write_text("{ not valid", encoding="utf-8")
+        with pytest.raises(json.JSONDecodeError):
+            _load_keyword_json(p)
 
 
 class TestClassifySize:
