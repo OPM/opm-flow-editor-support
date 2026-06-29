@@ -5,6 +5,9 @@ import {
   parseRecordLine,
   isCommentLine,
   formatRecordGroup,
+  parseUdqExpressionLine,
+  formatUdqExpressionGroup,
+  formatUdqBlock,
   parseHeadingPositions,
   formatRecordGroupWithHeading,
   buildHeadingAndAlignedRecords,
@@ -348,6 +351,141 @@ describe('formatRecordGroup — integer columns', () => {
     const result = formatRecordGroup(records);
     expect(result[0]).toBe(' 1  2 -- row A');
     expect(result[1]).toBe('10 20');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UDQ expression group alignment
+// ---------------------------------------------------------------------------
+
+describe('parseUdqExpressionLine', () => {
+  test('keeps a division "/" in the expression, not as the terminator', () => {
+    const r = parseUdqExpressionLine("DEFINE WUPR1 1/(WWCT 'OP*') /")!;
+    expect(r.control).toBe('DEFINE');
+    expect(r.name).toBe('WUPR1');
+    expect(r.expr).toBe("1/(WWCT 'OP*')");
+    expect(r.hasTerminator).toBe(true);
+  });
+
+  test('keeps a trailing glued division "/" in the expression', () => {
+    const r = parseUdqExpressionLine("DEFINE WU_TEST  WUBHPINI '*' - (WGPR '*')/2000.0 /")!;
+    expect(r.name).toBe('WU_TEST');
+    expect(r.expr).toBe("WUBHPINI '*' - (WGPR '*')/2000.0");
+    expect(r.hasTerminator).toBe(true);
+  });
+
+  test('returns null for a non-UDQ line', () => {
+    expect(parseUdqExpressionLine("COMPDAT 'OP1' 1 1 1 1 OPEN /")).toBeNull();
+    expect(parseUdqExpressionLine('DEFINE')).toBeNull(); // control word, no name
+  });
+
+  test('captures a trailing comment', () => {
+    const r = parseUdqExpressionLine('ASSIGN WU2 3.0 / -- a note')!;
+    expect(r.expr).toBe('3.0');
+    expect(r.trailComment).toBe('-- a note');
+  });
+});
+
+describe('formatUdqExpressionGroup', () => {
+  const parse = (lines: string[]) => lines.map(l => parseUdqExpressionLine(l)!);
+
+  test('control word and name left-aligned, expression right-aligned', () => {
+    const result = formatUdqExpressionGroup(parse([
+      "DEFINE WUPR1 1/(WWCT 'OP*') /",
+      'UNITS WUPR1 BARSA /',
+      'DEFINE WUPR3 SORTA(WUPR1) /',
+      'ASSIGN WU2 3.0 /',
+    ]));
+    // The longest expression sits one space past the name column.
+    expect(result[0]).toBe("DEFINE WUPR1 1/(WWCT 'OP*') /");
+    // Control words left-aligned (UNITS padded on the right, no leading space)
+    // so the name column still lines up.
+    expect(result[1].startsWith('UNITS  WUPR1')).toBe(true);
+    // Shorter expressions are pushed right so the terminators line up.
+    const slashCols = result.map(l => l.lastIndexOf('/'));
+    expect(new Set(slashCols).size).toBe(1);
+    expect(result[1].endsWith('BARSA /')).toBe(true);
+    expect(result[3].endsWith('3.0 /')).toBe(true);
+  });
+
+  test('matches the right-aligned-expression layout from the example', () => {
+    const result = formatUdqExpressionGroup(parse([
+      'UPDATE FUBHPP1 OFF /',
+      'UPDATE WUBHPINI OFF /',
+      "DEFINE WUDELTA WBHP '*' - FUBHPP1 /",
+      "DEFINE WU_TEST  WUBHPINI '*' - (WGPR '*')/2000.0 /",
+    ]));
+    // Terminators all align.
+    const slashCols = result.map(l => l.lastIndexOf('/'));
+    expect(new Set(slashCols).size).toBe(1);
+    // The longest (unpadded) expression line is reproduced verbatim.
+    expect(result[3]).toBe("DEFINE WU_TEST  WUBHPINI '*' - (WGPR '*')/2000.0 /");
+    expect(result[0].endsWith('OFF /')).toBe(true);
+    expect(result[2].endsWith("WBHP '*' - FUBHPP1 /")).toBe(true);
+  });
+
+  test('indent and trailing comment are preserved', () => {
+    const result = formatUdqExpressionGroup(parse([
+      '  DEFINE WU1 1 / -- note',
+      '  ASSIGN WU22 2 /',
+    ]));
+    expect(result[0]).toBe('  DEFINE WU1  1 / -- note');
+    expect(result[1]).toBe('  ASSIGN WU22 2 /');
+  });
+});
+
+describe('formatUdqBlock — comments inside a UDQ block', () => {
+  test('comment lines are left unchanged and do not split the table', () => {
+    const lines = [
+      'DEFINE WUPR1 1/(WWCT \'OP*\') /',
+      '-- sort the production wells worst-first',
+      'DEFINE WUPR3 SORTA(WUPR1) /',
+      'ASSIGN WU2 3.0 /',
+    ];
+    const result = formatUdqBlock(lines);
+    // The comment is returned byte-for-byte unchanged.
+    expect(result[1]).toBe('-- sort the production wells worst-first');
+    // All UDQ statements (above and below the comment) align as one table:
+    // their terminators share a single column.
+    const dataLines = [result[0], result[2], result[3]];
+    const slashCols = dataLines.map(l => l.lastIndexOf('/'));
+    expect(new Set(slashCols).size).toBe(1);
+    expect(result[0]).toBe("DEFINE WUPR1 1/(WWCT 'OP*') /");
+  });
+
+  test('an indented comment keeps its exact original indentation', () => {
+    const lines = [
+      'ASSIGN WU1 1.0 /',
+      '    -- indented note, untouched',
+      'DEFINE WULONGNAME 2.0 /',
+    ];
+    const result = formatUdqBlock(lines);
+    expect(result[1]).toBe('    -- indented note, untouched');
+    // names left-aligned to the widest (WULONGNAME), terminators still aligned.
+    expect(result[0].lastIndexOf('/')).toBe(result[2].lastIndexOf('/'));
+    expect(result[0].endsWith('1.0 /')).toBe(true);
+  });
+
+  test('returns input unchanged when fewer than two statements', () => {
+    const lines = ['-- just a comment', 'DEFINE WU1 1 /'];
+    expect(formatUdqBlock(lines)).toEqual(lines);
+  });
+
+  test('blank lines are left unchanged and do not split the table', () => {
+    const lines = [
+      'ASSIGN WU1 1.0 /',
+      '',
+      'DEFINE WULONGNAME 2.0 /',
+      '   ',
+      'UNITS WU1 BARSA /',
+    ];
+    const result = formatUdqBlock(lines);
+    // Blank lines preserved verbatim.
+    expect(result[1]).toBe('');
+    expect(result[3]).toBe('   ');
+    // All three statements align as one table despite the blank lines.
+    const slashCols = [result[0], result[2], result[4]].map(l => l.lastIndexOf('/'));
+    expect(new Set(slashCols).size).toBe(1);
   });
 });
 

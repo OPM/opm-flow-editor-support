@@ -232,6 +232,14 @@ const TEMPLATE_SUFFIX_RE = /^[A-Z0-9]+$/;
 const UDQ_NAME_RE = /^[ABCFGRSW]U[A-Z0-9_]+$/;
 
 /**
+ * Control words that introduce a statement inside a `UDQ` block. Every record
+ * in a UDQ block must begin with one of these (see the OPM Flow manual `UDQ`
+ * keyword): `ASSIGN` a constant, `DEFINE` a formula, set the display `UNITS`,
+ * or `UPDATE` the evaluation state.
+ */
+const UDQ_CONTROL_WORDS = new Set(['ASSIGN', 'DEFINE', 'UNITS', 'UPDATE']);
+
+/**
  * Region summary vector qualified by a named FIP region set, e.g. ``ROIP_ABC``
  * (= base vector ``ROIP`` over region set ``ABC``) or ``RPR__ABC``. The base is
  * a region vector (``R``-prefixed) that exists in the index; the ``_<NAME>``
@@ -475,6 +483,13 @@ export function computeDiagnostics(
   // deck, the rest pulled in via INCLUDE), so once we've seen one we can no
   // longer trust `currentSection` and must suppress the wrong-section check.
   let includeSinceSection = false;
+  // Tracks an open `ACTIONX` block. ACTIONX opens a block of nested SCHEDULE
+  // keywords (the action) that must be closed by an `ENDACTIO`; the active
+  // keyword moves on to those nested keywords, so this is tracked separately
+  // and evaluated at end-of-deck to flag a block that is never closed.
+  let actionxOpenLine = -1;
+  let actionxStart = 0;
+  let actionxEnd = 0;
   // First occurrence of each recognised keyword (by canonical entry name),
   // collected during the walk and evaluated once at the end for the
   // document-wide requires/prohibits constraints.
@@ -718,6 +733,18 @@ export function computeDiagnostics(
           continue;
         }
 
+        // ACTIONX ... ENDACTIO block tracking. ACTIONX opens an action block
+        // that must be closed by ENDACTIO. The intervening (nested) keywords
+        // become the active keyword in turn, so the open state is tracked on
+        // the side and reported at end-of-deck if never closed.
+        if (activeKw.name === 'ACTIONX') {
+          actionxOpenLine = i;
+          actionxStart = activeKwIndent;
+          actionxEnd = activeKwIndent + kw.length;
+        } else if (activeKw.name === 'ENDACTIO') {
+          actionxOpenLine = -1;
+        }
+
         // Record the first occurrence of this keyword for the document-wide
         // requires/prohibits checks. Keyed by the canonical entry name so a
         // templated deck token (FTPRSEA) maps to its base (FTPR); the range
@@ -765,6 +792,23 @@ export function computeDiagnostics(
     if (!activeKw) continue;
     const tokens = tokenizeLine(text);
     if (tokens.length === 0) continue;
+
+    // UDQ body statements must begin with a control word
+    // (ASSIGN/DEFINE/UNITS/UPDATE). Check only the first line of a statement —
+    // `openRecordLine < 0` means no earlier statement is still awaiting its
+    // '/', so this line starts a new statement rather than continuing one.
+    if (activeKw.name === 'UDQ' && openRecordLine < 0) {
+      const head = tokens[0].text.toUpperCase();
+      if (!UDQ_CONTROL_WORDS.has(head)) {
+        out.push({
+          line: i,
+          startChar: tokens[0].start,
+          endChar: tokens[0].end,
+          message:
+            `UDQ: expected a control word (ASSIGN, DEFINE, UNITS or UPDATE) but found '${tokens[0].text}'.`,
+        });
+      }
+    }
 
     const lastTok = tokens[tokens.length - 1];
     const hasTerm = lineHasRecordTerminator(text, lastTok.end);
@@ -856,6 +900,16 @@ export function computeDiagnostics(
   }
 
   closeKw();
+
+  // An ACTIONX block left open at end of deck has no matching ENDACTIO.
+  if (actionxOpenLine >= 0) {
+    out.push({
+      line: actionxOpenLine,
+      startChar: actionxStart,
+      endChar: actionxEnd,
+      message: `ACTIONX: action block is not closed; a matching ENDACTIO is required.`,
+    });
+  }
 
   // --- Cross-keyword constraints (requires / prohibits) -------------------
   // Evaluated document-wide once all keyword occurrences are known.
