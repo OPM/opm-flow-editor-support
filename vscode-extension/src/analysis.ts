@@ -261,6 +261,20 @@ const UDQ_CONTROL_WORDS = new Set(['ASSIGN', 'DEFINE', 'UNITS', 'UPDATE']);
 const RAW_TEXT_BODY_KEYWORDS = new Set(['TITLE']);
 
 /**
+ * Report keywords whose record body is a free-form list of output mnemonics
+ * terminated by a standalone '/'. Many of those mnemonics are spelled exactly
+ * like real keywords (PRESSURE, SGAS, SOIL, XMF, …) and sit in column 1, so the
+ * generic keyword scanner would otherwise close the report block early and flag
+ * each mnemonic as a wrong-section / unterminated keyword. While one of these is
+ * the active block, every column-1 token is treated as body content; a section
+ * header (checked earlier) still ends the block.
+ */
+const FREEFORM_MNEMONIC_KEYWORDS = new Set([
+  'RPTRST', 'RPTSCHED', 'RPTSOL', 'RPTGRID', 'RPTPROPS', 'RPTREGS',
+  'RPTEDIT', 'RPTRUN',
+]);
+
+/**
  * Region summary vector qualified by a named FIP region set, e.g. ``ROIP_ABC``
  * (= base vector ``ROIP`` over region set ``ABC``) or ``RPR__ABC``. The base is
  * a region vector (``R``-prefixed) that exists in the index; the ``_<NAME>``
@@ -706,10 +720,16 @@ export function computeDiagnostics(
       // an indented uppercase token cannot start a new keyword even
       // if its name happens to be in the index (THPRES, INCLUDE, …).
       const entry = lookupEntry(index, kw);
+      // While a report keyword's free-form mnemonic body is open, any column-1
+      // token (even one matching a real keyword name) is a mnemonic, not a new
+      // keyword. Section headers are matched earlier and still end the block.
+      const inFreeformMnemonicBlock =
+        activeKw !== null && FREEFORM_MNEMONIC_KEYWORDS.has(activeKw.name);
       const treatAsRecord =
         activeKw !== null
         && !excludedKeywords.has(kw)
         && (
+          inFreeformMnemonicBlock ||
           // An indented token that is not a known keyword cannot be a keyword
           // at all (OPM only recognises keywords in column 1), so it is record
           // body of the active block — e.g. a single well name '  PROD2 /'

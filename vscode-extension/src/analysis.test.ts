@@ -97,6 +97,20 @@ const index: Record<string, AnalysisEntry> = {
     sections: ['SUMMARY'],
     size_kind: 'array',
   },
+  // Report keyword with a free-form mnemonic body terminated by '/'.
+  RPTRST: {
+    name: 'RPTRST',
+    sections: ['SOLUTION', 'SCHEDULE'],
+    size_kind: 'fixed',
+    size_count: 1,
+    variadic_record: true,
+  },
+  // SOLUTION cell array whose name collides with an RPTRST mnemonic.
+  PRESSURE: {
+    name: 'PRESSURE',
+    sections: ['SOLUTION'],
+    size_kind: 'array',
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -721,10 +735,10 @@ describe('computeDiagnostics — unknown keywords', () => {
   });
 
   it('does not flag keywords on the exclusion list', () => {
-    // RPTSCHED is excluded — must not be flagged as unknown even though it's
-    // absent from the supplied test index.
-    const lines = ['SCHEDULE', 'RPTSCHED', "'WELLS=2' /", '/'];
-    expect(computeDiagnostics(lines, index)).toEqual([]);
+    // A keyword on the exclusion set must not be flagged as unknown even when
+    // it's absent from the supplied index.
+    const lines = ['SCHEDULE', 'FOORPT', "'WELLS=2' /", '/'];
+    expect(computeDiagnostics(lines, index, new Set(['FOORPT']))).toEqual([]);
   });
 
   it('does not run record-body checks after an unknown keyword', () => {
@@ -944,19 +958,24 @@ describe('computeDiagnostics — excluded keywords', () => {
     },
   };
 
-  it('does not flag RPTSCHED in a section where it would otherwise be invalid', () => {
+  // An explicitly-excluded keyword opts out of every check. (RPTSCHED is no
+  // longer excluded by default — its free-form body is now understood
+  // directly — so these exercise the mechanism via an explicit custom set.)
+  const excludeRptsched = new Set(['RPTSCHED']);
+
+  it('does not flag an excluded keyword in an otherwise-invalid section', () => {
     const lines = ['SCHEDULE', 'RPTSCHED', "'WELLS=2' 'SUMMARY=2' 'CPU=2' /", '/'];
-    expect(computeDiagnostics(lines, indexWithRptsched)).toEqual([]);
+    expect(computeDiagnostics(lines, indexWithRptsched, excludeRptsched)).toEqual([]);
   });
 
-  it('does not flag arity overflow on RPTSCHED records', () => {
+  it('does not flag arity overflow on an excluded keyword', () => {
     const lines = ['SCHEDULE', 'RPTSCHED', "'A' 'B' 'C' 'D' /", '/'];
-    expect(computeDiagnostics(lines, indexWithRptsched)).toEqual([]);
+    expect(computeDiagnostics(lines, indexWithRptsched, excludeRptsched)).toEqual([]);
   });
 
-  it('does not flag a missing list terminator on RPTSCHED', () => {
+  it('does not flag a missing list terminator on an excluded keyword', () => {
     const lines = ['SCHEDULE', 'RPTSCHED', "'WELLS=2' /", 'WELSPECS', '/'];
-    expect(computeDiagnostics(lines, indexWithRptsched)).toEqual([]);
+    expect(computeDiagnostics(lines, indexWithRptsched, excludeRptsched)).toEqual([]);
   });
 
   it('honours a custom exclusion set passed to computeDiagnostics', () => {
@@ -2032,5 +2051,38 @@ describe('computeDiagnostics — bare SUMMARY array vectors', () => {
     const diags = computeDiagnostics(lines, index);
     expect(diags).toHaveLength(1);
     expect(diags[0].message).toMatch(/WSIR: missing terminating/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Free-form report mnemonic bodies (RPTRST, …)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — report keyword mnemonic bodies', () => {
+  it('does not parse RPTRST mnemonics that collide with keyword names', () => {
+    const lines = [
+      'SOLUTION',
+      'RPTRST',
+      'BASIC = 2',
+      'PRESSURE',
+      'SGAS',
+      'SOIL',
+      'XMF',
+      'YMF',
+      'ZMF',
+      '/',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('lets a section header end an unterminated report block', () => {
+    const lines = [
+      'SOLUTION',
+      'RPTRST',
+      'PRESSURE',
+      'SGAS',
+      'SCHEDULE',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
   });
 });
