@@ -890,7 +890,7 @@ export function computeDiagnostics(
     if (entry.prohibits) {
       for (const pro of entry.prohibits) {
         if (!seenKeywords.has(pro)) continue;
-        const pairKey = name < pro ? `${name} ${pro}` : `${pro} ${name}`;
+        const pairKey = name < pro ? `${name} ${pro}` : `${pro} ${name}`;
         if (reportedProhibitPairs.has(pairKey)) continue;
         reportedProhibitPairs.add(pairKey);
         out.push({
