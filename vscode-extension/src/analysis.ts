@@ -210,7 +210,16 @@ function expectsMoreRecords(
   if (entry.size_kind === 'list') return !listTerminatorSeen;
   if (entry.size_kind === 'array') return !arrayTerminatorSeen;
   if (entry.size_kind === 'fixed') {
-    const expected = entry.records_meta?.length ?? entry.size_count ?? 0;
+    // opm-common sometimes classifies a keyword as `fixed` without resolving a
+    // concrete record count (e.g. EOS, whose count derives from another
+    // keyword). When the count is unknown but the keyword does take a record
+    // (it has a per-record column count), assume it expects at least one — so a
+    // single value record on the next line (`EOS` <nl> `PR /`) is absorbed
+    // rather than mistaken for a new keyword.
+    const expected =
+      entry.records_meta?.length
+      ?? entry.size_count
+      ?? (entry.expected_columns ? 1 : 0);
     return recordCount < expected;
   }
   return false;
@@ -238,6 +247,32 @@ const UDQ_NAME_RE = /^[ABCFGRSW]U[A-Z0-9_]+$/;
  * or `UPDATE` the evaluation state.
  */
 const UDQ_CONTROL_WORDS = new Set(['ASSIGN', 'DEFINE', 'UNITS', 'UPDATE']);
+
+/**
+ * Keywords whose "record" is a single line of free-form text on the line after
+ * the keyword name, with no '/' terminator (mirrors the build script's
+ * ``RAW_TEXT_KEYWORDS``). The body text is arbitrary and frequently happens to
+ * be an upper-case token that collides with a real keyword name — e.g.
+ * ``TITLE`` followed by ``CO2STORE`` or ``ACTIONX_GCONPROD``. Without special
+ * handling that body line is mis-parsed as a keyword (flagged "indented" or
+ * "not recognised"), so the line immediately following one of these keywords is
+ * consumed verbatim and never analysed.
+ */
+const RAW_TEXT_BODY_KEYWORDS = new Set(['TITLE']);
+
+/**
+ * Report keywords whose record body is a free-form list of output mnemonics
+ * terminated by a standalone '/'. Many of those mnemonics are spelled exactly
+ * like real keywords (PRESSURE, SGAS, SOIL, XMF, …) and sit in column 1, so the
+ * generic keyword scanner would otherwise close the report block early and flag
+ * each mnemonic as a wrong-section / unterminated keyword. While one of these is
+ * the active block, every column-1 token is treated as body content; a section
+ * header (checked earlier) still ends the block.
+ */
+const FREEFORM_MNEMONIC_KEYWORDS = new Set([
+  'RPTRST', 'RPTSCHED', 'RPTSOL', 'RPTGRID', 'RPTPROPS', 'RPTREGS',
+  'RPTEDIT', 'RPTRUN',
+]);
 
 /**
  * Region summary vector qualified by a named FIP region set, e.g. ``ROIP_ABC``
@@ -274,6 +309,27 @@ function isSummaryModifierVector(index: AnalysisIndex, kw: string): boolean {
   if (kw.endsWith('L') && isSummaryBase(index, kw.slice(0, -1))) return true;
   if (kw.startsWith('L') && isSummaryBase(index, kw.slice(1))) return true;
   return false;
+}
+
+/**
+ * True when `kw` is a recognised SUMMARY vector by *shape* rather than by an
+ * explicit index entry: a user-defined quantity name (WUOPRL, FU_VAR1), a
+ * region-set-qualified vector (ROIP_ABC), a standard L-modifier vector, or a
+ * member of one of opm-common's open-ended summary-vector families. Such a
+ * token at column 1 starts its own vector and must never be absorbed as a
+ * name-list argument of a preceding SUMMARY vector.
+ */
+function isShapeRecognisedSummaryToken(
+  kw: string,
+  index: AnalysisIndex,
+  summaryNamePatterns: readonly RegExp[],
+): boolean {
+  return (
+    UDQ_NAME_RE.test(kw)
+    || isRegionSetVector(index, kw)
+    || isSummaryModifierVector(index, kw)
+    || summaryNamePatterns.some(re => re.test(kw))
+  );
 }
 
 /** Resolve `kw` to an index entry, falling back to a templated-prefix
@@ -476,6 +532,10 @@ export function computeDiagnostics(
   let openRecordEnd = 0;
   let listTerminatorSeen = false;
   let arrayTerminatorSeen = false;
+  // Set once a RAW_TEXT_BODY_KEYWORD (TITLE, …) is recognised: the next
+  // non-blank, non-comment line is its free-form text body and must be skipped
+  // wholesale rather than parsed as a keyword.
+  let expectRawTextLine = false;
   let currentSection: string | null = null;
   // True once an INCLUDE/IMPORT/GDFILE has appeared since the last section
   // header. An included file may itself contain section headers (decks
@@ -530,7 +590,20 @@ export function computeDiagnostics(
     // and stacked, so a block that consumed no records doesn't need a
     // closing '/'. Once values are present the normal array/list rule
     // applies again.
-    const bareOptionalBody = activeKw.optional_body && recordCount === 0;
+    //
+    // Any `array`-kind SUMMARY vector is treated the same when it consumed no
+    // records: WSIR/WSPR/WMCTL and the C/W component-rate vectors are routinely
+    // written bare and stacked with a single shared '/'. opm-common's
+    // probe-expanded entries don't carry the `optional_body` flag, so key off
+    // the SUMMARY section list instead (which reliably separates them from real
+    // cell arrays like PRESSURE/PORO that legitimately require a terminator).
+    const isBareSummaryArray =
+      activeKw.size_kind === 'array' &&
+      recordCount === 0 &&
+      Array.isArray(activeKw.sections) &&
+      activeKw.sections.includes('SUMMARY');
+    const bareOptionalBody =
+      (activeKw.optional_body && recordCount === 0) || isBareSummaryArray;
     const needsTerminator =
       !bareOptionalBody
       // Variadic-record keywords (VFPPROD, VFPINJ, RSVD, …) have a table-style
@@ -580,6 +653,15 @@ export function computeDiagnostics(
     const text = lines[i];
     if (isCommentLine(text)) continue;
     if (text.trim() === '') continue;
+
+    // Free-form text body of a raw-text keyword (TITLE, …). Consumed verbatim
+    // so a title like `CO2STORE` or `ACTIONX_GCONPROD` is not mis-parsed as a
+    // keyword. Done before every other check (section, terminator, keyword) so
+    // even title text shaped like a section header is left alone.
+    if (expectRawTextLine) {
+      expectRawTextLine = false;
+      continue;
+    }
 
     // A line that is just '/' (with optional comment). When a record is open
     // (its values were on previous lines) this '/' terminates that record. When
@@ -659,10 +741,31 @@ export function computeDiagnostics(
       // an indented uppercase token cannot start a new keyword even
       // if its name happens to be in the index (THPRES, INCLUDE, …).
       const entry = lookupEntry(index, kw);
+      // While a report keyword's free-form mnemonic body is open, any column-1
+      // token (even one matching a real keyword name) is a mnemonic, not a new
+      // keyword. Section headers are matched earlier and still end the block.
+      const inFreeformMnemonicBlock =
+        activeKw !== null && FREEFORM_MNEMONIC_KEYWORDS.has(activeKw.name);
+      // A column-1 token that is itself a recognised SUMMARY vector (by shape)
+      // sitting under an open SUMMARY vector starts its own vector — it is not a
+      // name-list argument. Without this guard a bare enable-keyword (PERFORMA)
+      // would greedily swallow the UDQ/tracer mnemonics that follow it and then
+      // be flagged for a missing terminator.
+      const activeIsSummaryVector =
+        activeKw !== null
+        && Array.isArray(activeKw.sections)
+        && activeKw.sections.includes('SUMMARY');
+      const tokenStartsOwnSummaryVector =
+        indent === 0
+        && !entry
+        && activeIsSummaryVector
+        && isShapeRecognisedSummaryToken(kw, index, summaryNamePatterns);
       const treatAsRecord =
         activeKw !== null
         && !excludedKeywords.has(kw)
+        && !tokenStartsOwnSummaryVector
         && (
+          inFreeformMnemonicBlock ||
           // An indented token that is not a known keyword cannot be a keyword
           // at all (OPM only recognises keywords in column 1), so it is record
           // body of the active block — e.g. a single well name '  PROD2 /'
@@ -709,19 +812,11 @@ export function computeDiagnostics(
         // typo. Flag and stop tracking — there's no parser data to validate the
         // record body against anyway.
         if (!activeKw) {
-          // User-defined quantity names (WUOPRL, FU_VAR1, …) are recognised by
-          // shape: they are user-defined and so never appear in the index, but
-          // are valid as bare SUMMARY mnemonics and in ACTIONX/UDQ bodies.
-          if (UDQ_NAME_RE.test(kw)) continue;
-          // Region summary vectors qualified by a named FIP region set
-          // (ROIP_ABC, RPR__ABC) are likewise user-qualified and not indexed.
-          if (isRegionSetVector(index, kw)) continue;
-          // Standard L-modifier summary vectors (WOPRL completion-level,
-          // LWWIR LGR-local) built on an indexed SUMMARY base vector.
-          if (isSummaryModifierVector(index, kw)) continue;
-          // Open-ended summary-vector families from opm-common's
-          // deck_name_regex (UDQ, tracer, water-cut-bucket mnemonics).
-          if (summaryNamePatterns.some(re => re.test(kw))) continue;
+          // Recognised SUMMARY vectors by shape rather than index entry:
+          // user-defined quantity names (WUOPRL, FU_VAR1), region-set-qualified
+          // vectors (ROIP_ABC), standard L-modifier vectors (WOPRL, LWWIR), and
+          // members of opm-common's open-ended deck_name_regex families.
+          if (isShapeRecognisedSummaryToken(kw, index, summaryNamePatterns)) continue;
           out.push({
             line: i,
             startChar: activeKwIndent,
@@ -743,6 +838,12 @@ export function computeDiagnostics(
           actionxEnd = activeKwIndent + kw.length;
         } else if (activeKw.name === 'ENDACTIO') {
           actionxOpenLine = -1;
+        }
+
+        // Raw-text keywords (TITLE, …) carry a single free-form text line that
+        // must not be parsed as a keyword. Arm the skip for the next line.
+        if (RAW_TEXT_BODY_KEYWORDS.has(activeKw.name)) {
+          expectRawTextLine = true;
         }
 
         // Record the first occurrence of this keyword for the document-wide

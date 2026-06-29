@@ -8,9 +8,11 @@
 // VS Code setting, which the extension reads at activation and on change.
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS: readonly string[] = [
-  'RPTSCHED',
-];
+// RPTSCHED and the other RPT* report keywords are no longer excluded
+// wholesale: the diagnostics engine now understands their free-form mnemonic
+// bodies directly (see FREEFORM_MNEMONIC_KEYWORDS in analysis.ts), so the body
+// is recognised without suppressing every other check on the keyword itself.
+export const DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS: readonly string[] = [];
 
 export const DIAGNOSTICS_EXCLUDED_KEYWORDS: ReadonlySet<string> = new Set(
   DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS,

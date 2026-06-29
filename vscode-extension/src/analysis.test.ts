@@ -68,6 +68,49 @@ const index: Record<string, AnalysisEntry> = {
     sections: ['SCHEDULE'],
     size_kind: 'array',
   },
+  TITLE: {
+    name: 'TITLE',
+    sections: ['RUNSPEC'],
+    size_kind: 'none',
+  },
+  CO2STORE: {
+    name: 'CO2STORE',
+    sections: ['RUNSPEC'],
+    size_kind: 'none',
+  },
+  // `fixed` keyword whose record count opm-common leaves unresolved (no
+  // size_count); only `expected_columns` is known.
+  EOS: {
+    name: 'EOS',
+    expected_columns: 1,
+    sections: ['RUNSPEC', 'PROPS'],
+    size_kind: 'fixed',
+  },
+  // SUMMARY-section array vectors (probe-expanded), no optional_body flag.
+  WSIR: {
+    name: 'WSIR',
+    sections: ['SUMMARY'],
+    size_kind: 'array',
+  },
+  WSPR: {
+    name: 'WSPR',
+    sections: ['SUMMARY'],
+    size_kind: 'array',
+  },
+  // Report keyword with a free-form mnemonic body terminated by '/'.
+  RPTRST: {
+    name: 'RPTRST',
+    sections: ['SOLUTION', 'SCHEDULE'],
+    size_kind: 'fixed',
+    size_count: 1,
+    variadic_record: true,
+  },
+  // SOLUTION cell array whose name collides with an RPTRST mnemonic.
+  PRESSURE: {
+    name: 'PRESSURE',
+    sections: ['SOLUTION'],
+    size_kind: 'array',
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -692,10 +735,10 @@ describe('computeDiagnostics — unknown keywords', () => {
   });
 
   it('does not flag keywords on the exclusion list', () => {
-    // RPTSCHED is excluded — must not be flagged as unknown even though it's
-    // absent from the supplied test index.
-    const lines = ['SCHEDULE', 'RPTSCHED', "'WELLS=2' /", '/'];
-    expect(computeDiagnostics(lines, index)).toEqual([]);
+    // A keyword on the exclusion set must not be flagged as unknown even when
+    // it's absent from the supplied index.
+    const lines = ['SCHEDULE', 'FOORPT', "'WELLS=2' /", '/'];
+    expect(computeDiagnostics(lines, index, new Set(['FOORPT']))).toEqual([]);
   });
 
   it('does not run record-body checks after an unknown keyword', () => {
@@ -915,19 +958,24 @@ describe('computeDiagnostics — excluded keywords', () => {
     },
   };
 
-  it('does not flag RPTSCHED in a section where it would otherwise be invalid', () => {
+  // An explicitly-excluded keyword opts out of every check. (RPTSCHED is no
+  // longer excluded by default — its free-form body is now understood
+  // directly — so these exercise the mechanism via an explicit custom set.)
+  const excludeRptsched = new Set(['RPTSCHED']);
+
+  it('does not flag an excluded keyword in an otherwise-invalid section', () => {
     const lines = ['SCHEDULE', 'RPTSCHED', "'WELLS=2' 'SUMMARY=2' 'CPU=2' /", '/'];
-    expect(computeDiagnostics(lines, indexWithRptsched)).toEqual([]);
+    expect(computeDiagnostics(lines, indexWithRptsched, excludeRptsched)).toEqual([]);
   });
 
-  it('does not flag arity overflow on RPTSCHED records', () => {
+  it('does not flag arity overflow on an excluded keyword', () => {
     const lines = ['SCHEDULE', 'RPTSCHED', "'A' 'B' 'C' 'D' /", '/'];
-    expect(computeDiagnostics(lines, indexWithRptsched)).toEqual([]);
+    expect(computeDiagnostics(lines, indexWithRptsched, excludeRptsched)).toEqual([]);
   });
 
-  it('does not flag a missing list terminator on RPTSCHED', () => {
+  it('does not flag a missing list terminator on an excluded keyword', () => {
     const lines = ['SCHEDULE', 'RPTSCHED', "'WELLS=2' /", 'WELSPECS', '/'];
-    expect(computeDiagnostics(lines, indexWithRptsched)).toEqual([]);
+    expect(computeDiagnostics(lines, indexWithRptsched, excludeRptsched)).toEqual([]);
   });
 
   it('honours a custom exclusion set passed to computeDiagnostics', () => {
@@ -1901,6 +1949,139 @@ describe('computeDiagnostics — ACTIONX block', () => {
       'FMWPR >= 5 /',
       '/',
       'ENDACTIO',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Raw-text keyword bodies (TITLE)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — raw-text keyword bodies', () => {
+  it('does not parse an indented TITLE text line as a keyword', () => {
+    const lines = [
+      'RUNSPEC',
+      'TITLE',
+      '   CO2STORE',
+      'DIMENS',
+      '20 1 20 /',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('does not flag a TITLE text token that collides with a keyword name', () => {
+    const lines = [
+      'RUNSPEC',
+      'TITLE',
+      'ACTIONX_GCONPROD',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('skips a blank line before consuming the TITLE text', () => {
+    const lines = [
+      'RUNSPEC',
+      'TITLE',
+      '',
+      'CO2STORE STUDY',
+      'DIMENS',
+      '1 1 1 /',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixed keywords with an unresolved record count (EOS)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — fixed keyword without size_count', () => {
+  it('absorbs the value record of a fixed keyword with no resolved count', () => {
+    const lines = [
+      'RUNSPEC',
+      'EOS',
+      'PR /',
+      'DIMENS',
+      '1 1 1 /',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('still starts a new keyword when a known keyword follows a bare EOS', () => {
+    const lines = [
+      'RUNSPEC',
+      'EOS',
+      'DIMENS',
+      '1 1 1 /',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bare SUMMARY array vectors (WSIR/WSPR stacked, shared terminator)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — bare SUMMARY array vectors', () => {
+  it('does not require a terminator on bare, stacked SUMMARY vectors', () => {
+    const lines = [
+      'SUMMARY',
+      'WSIR',
+      'WSPR',
+      '/',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('accepts a lone bare SUMMARY vector with no body', () => {
+    const lines = [
+      'SUMMARY',
+      'WSIR',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('still flags a SUMMARY vector that lists wells but forgets the close', () => {
+    const lines = [
+      'SUMMARY',
+      'WSIR',
+      "'PROD1' 'PROD2'",
+    ];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toMatch(/WSIR: missing terminating/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Free-form report mnemonic bodies (RPTRST, …)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — report keyword mnemonic bodies', () => {
+  it('does not parse RPTRST mnemonics that collide with keyword names', () => {
+    const lines = [
+      'SOLUTION',
+      'RPTRST',
+      'BASIC = 2',
+      'PRESSURE',
+      'SGAS',
+      'SOIL',
+      'XMF',
+      'YMF',
+      'ZMF',
+      '/',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('lets a section header end an unterminated report block', () => {
+    const lines = [
+      'SOLUTION',
+      'RPTRST',
+      'PRESSURE',
+      'SGAS',
+      'SCHEDULE',
     ];
     expect(computeDiagnostics(lines, index)).toEqual([]);
   });
