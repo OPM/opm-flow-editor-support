@@ -78,6 +78,14 @@ const index: Record<string, AnalysisEntry> = {
     sections: ['RUNSPEC'],
     size_kind: 'none',
   },
+  // `fixed` keyword whose record count opm-common leaves unresolved (no
+  // size_count); only `expected_columns` is known.
+  EOS: {
+    name: 'EOS',
+    expected_columns: 1,
+    sections: ['RUNSPEC', 'PROPS'],
+    size_kind: 'fixed',
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -1947,6 +1955,33 @@ describe('computeDiagnostics — raw-text keyword bodies', () => {
       'TITLE',
       '',
       'CO2STORE STUDY',
+      'DIMENS',
+      '1 1 1 /',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixed keywords with an unresolved record count (EOS)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — fixed keyword without size_count', () => {
+  it('absorbs the value record of a fixed keyword with no resolved count', () => {
+    const lines = [
+      'RUNSPEC',
+      'EOS',
+      'PR /',
+      'DIMENS',
+      '1 1 1 /',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('still starts a new keyword when a known keyword follows a bare EOS', () => {
+    const lines = [
+      'RUNSPEC',
+      'EOS',
       'DIMENS',
       '1 1 1 /',
     ];

@@ -210,7 +210,16 @@ function expectsMoreRecords(
   if (entry.size_kind === 'list') return !listTerminatorSeen;
   if (entry.size_kind === 'array') return !arrayTerminatorSeen;
   if (entry.size_kind === 'fixed') {
-    const expected = entry.records_meta?.length ?? entry.size_count ?? 0;
+    // opm-common sometimes classifies a keyword as `fixed` without resolving a
+    // concrete record count (e.g. EOS, whose count derives from another
+    // keyword). When the count is unknown but the keyword does take a record
+    // (it has a per-record column count), assume it expects at least one — so a
+    // single value record on the next line (`EOS` <nl> `PR /`) is absorbed
+    // rather than mistaken for a new keyword.
+    const expected =
+      entry.records_meta?.length
+      ?? entry.size_count
+      ?? (entry.expected_columns ? 1 : 0);
     return recordCount < expected;
   }
   return false;
