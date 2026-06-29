@@ -14,6 +14,7 @@ Each keyword lives in: parts/chapters/subsections/X.3/KEYWORD.fodt
 """
 
 import argparse
+import copy
 import json
 import re
 import sys
@@ -54,6 +55,14 @@ RAW_TEXT_KEYWORDS = frozenset({"TITLE"})
 # followed by up to a five letter character string", producing deck tokens
 # like FIPZON, FIPGL, FIPNL, FIPUNIT, FIPHC, ….
 TEMPLATE_KEYWORD_NAMES = frozenset({"TVDP", "FIP"})
+
+# Region-number keywords that have per-direction Cartesian variants formed by
+# appending X / Y / Z to the base name (KRNUM -> KRNUMX/KRNUMY/KRNUMZ, IMBNUM
+# -> IMBNUMX/...). opm-common defines only the base name, so real decks using
+# the directional forms would otherwise be flagged as unknown keywords. Each
+# variant copies the base entry (same sections / shape / docs).
+DIRECTIONAL_VARIANT_BASES = frozenset({"KRNUM", "IMBNUM"})
+DIRECTIONAL_SUFFIXES = ("X", "Y", "Z")
 
 # Keywords whose record body is conventionally spread across multiple
 # lines, with only the line carrying '/' completing the record. opm-common's
@@ -190,6 +199,21 @@ def load_opm_common_index(keywords_dir: Path) -> dict:
                     "records":    data.get("records"),
                     "size_kind":  size_kind,
                     "size_count": size_count,
+                    # Summary-vector "PROBE" families (WELL_PROBE, FIELD_PROBE,
+                    # …) enumerate their concrete deck mnemonics here, plus a
+                    # regex for the open-ended families (UDQ, tracers). Retained
+                    # so the build can expand them into recognised entries.
+                    "deck_names":       data.get("deck_names"),
+                    "deck_name_regex":  data.get("deck_name_regex"),
+                    # Cross-keyword constraints (parser-truth). ``requires`` lists
+                    # keywords that must also appear in the deck; ``prohibits``
+                    # lists keywords that may not co-exist with this one. Both are
+                    # flat lists of canonical keyword names. Surfaced so the
+                    # diagnostics engine can emit "X requires Y" / "X conflicts
+                    # with Y" warnings.
+                    "requires":         data.get("requires"),
+                    "prohibits":        data.get("prohibits"),
+                    "comment":          data.get("comment", ""),
                 }
                 total += 1
     print(f"Loaded {total} keywords from opm-common ({keywords_dir})")
@@ -338,6 +362,18 @@ def _merge_records_mode(
     return merged, appended
 
 
+def _attach_cross_keyword(entry: dict, opm: dict) -> None:
+    """Copy the ``requires`` / ``prohibits`` lists from an opm-common entry onto
+    *entry* (a manual-shape dict), skipping empty/absent values so keywords
+    without constraints stay free of the fields."""
+    requires = opm.get("requires")
+    if requires:
+        entry["requires"] = list(requires)
+    prohibits = opm.get("prohibits")
+    if prohibits:
+        entry["prohibits"] = list(prohibits)
+
+
 def merge_opm_common(index: dict, opm_common_index: dict) -> None:
     """
     Mutate *index* in place, attaching opm-common authoritative data:
@@ -381,6 +417,10 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
         if size_count is not None:
             for e in entries:
                 e["size_count"] = size_count
+
+        # Cross-keyword constraints — independent of record shape.
+        for e in entries:
+            _attach_cross_keyword(e, opm)
 
         records = opm.get("records")
         if records:
@@ -486,6 +526,29 @@ def attach_string_options(index: dict) -> int:
     return attached
 
 
+def add_directional_variants(index: dict) -> int:
+    """
+    Emit per-direction Cartesian variants (X/Y/Z) for the region-number
+    keywords in DIRECTIONAL_VARIANT_BASES. Each variant is a copy of the base
+    entry with its name updated. Returns the number of variants added.
+    """
+    added = 0
+    for base in DIRECTIONAL_VARIANT_BASES:
+        base_entry = index.get(base)
+        if not base_entry:
+            continue
+        for suffix in DIRECTIONAL_SUFFIXES:
+            name = f"{base}{suffix}"
+            if name in index:
+                continue
+            entry = copy.deepcopy(base_entry)
+            entry["name"] = name
+            index[name] = entry
+            added += 1
+    print(f"Added {added} directional region-keyword variants")
+    return added
+
+
 def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
     """
     Add manual-shape entries for keywords that exist in opm-common but not
@@ -536,10 +599,69 @@ def synthesize_opm_only_entries(index: dict, opm_common_index: dict) -> int:
         size_count = opm.get("size_count")
         if size_count is not None:
             entry["size_count"] = size_count
+        _attach_cross_keyword(entry, opm)
         index[name] = entry
         added += 1
     print(f"Synthesized {added} OPM-only entries")
     return added
+
+
+def _probe_summary(comment: str, probe_name: str) -> str:
+    """One-line summary for an expanded summary-vector entry, derived from the
+    PROBE family comment (first non-empty line, trimmed)."""
+    for line in (comment or "").splitlines():
+        line = line.strip()
+        if line:
+            return (line[:117] + "...") if len(line) > 120 else line
+    return f"OPM Flow summary vector ({probe_name})"
+
+
+def expand_probe_deck_names(index: dict, opm_common_index: dict) -> int:
+    """
+    Expand the ``deck_names`` of opm-common summary-vector PROBE families
+    (WELL_PROBE, FIELD_PROBE, BLOCK_PROBE, …) into individual recognised
+    entries. Each is a minimal entry (name, sections, one-line summary) with no
+    size shape, so it is recognised by the diagnostics engine without triggering
+    arity or terminator checks. Existing entries (e.g. WOPR from the manual) are
+    left untouched. Returns the number of entries added.
+    """
+    added = 0
+    for probe_name, opm in opm_common_index.items():
+        deck_names = opm.get("deck_names")
+        if not deck_names:
+            continue
+        sections = list(opm.get("sections", []))
+        summary = _probe_summary(opm.get("comment", ""), probe_name)
+        for dn in deck_names:
+            if not dn or dn in index:
+                continue
+            index[dn] = {
+                "name":         dn,
+                "section":      sections[0] if sections else "",
+                "sections_opm": sections,
+                "supported":    True,
+                "summary":      summary,
+                "description":  "",
+                "parameters":   [],
+                "examples":     [],
+                "full_text":    "",
+                "source_file":  "",
+            }
+            added += 1
+    print(f"Expanded {added} summary-vector deck names")
+    return added
+
+
+def collect_deck_name_regexes(opm_common_index: dict) -> list[str]:
+    """Unique ``deck_name_regex`` patterns across all PROBE families, used by
+    the diagnostics engine to recognise open-ended summary-vector families
+    (UDQ, tracer, water-cut-bucket mnemonics)."""
+    seen: dict[str, None] = {}
+    for opm in opm_common_index.values():
+        rx = opm.get("deck_name_regex")
+        if rx:
+            seen.setdefault(rx, None)
+    return list(seen)
 
 
 # ---------------------------------------------------------------------------
@@ -1517,6 +1639,12 @@ def write_compact_json(index: dict, output_path: Path):
             out_entry["templated"] = True
         if primary.get("variadic_record"):
             out_entry["variadic_record"] = True
+        requires = primary.get("requires")
+        if requires:
+            out_entry["requires"] = requires
+        prohibits = primary.get("prohibits")
+        if prohibits:
+            out_entry["prohibits"] = prohibits
         compact[name] = out_entry
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(compact, f, separators=(",", ":"), ensure_ascii=False)
@@ -1603,6 +1731,8 @@ def main():
         )
         merge_opm_common(index, opm_common_index)
         synthesize_opm_only_entries(index, opm_common_index)
+        add_directional_variants(index)
+        expand_probe_deck_names(index, opm_common_index)
         attach_string_options(index)
 
     write_json(index, Path(args.output))
@@ -1610,6 +1740,15 @@ def main():
         write_summary_tsv(index, Path(args.tsv))
     if args.compact:
         write_compact_json(index, Path(args.compact))
+        # Emit the open-ended summary-vector regex families next to the compact
+        # index so the extension can recognise UDQ/tracer/water-cut mnemonics
+        # that are not enumerated as explicit deck names.
+        if args.opm_common_dir:
+            patterns = collect_deck_name_regexes(opm_common_index)
+            patterns_path = Path(args.compact).with_name("summary_name_patterns.json")
+            with open(patterns_path, "w", encoding="utf-8") as f:
+                json.dump(patterns, f, separators=(",", ":"), ensure_ascii=False)
+            print(f"Wrote summary-vector patterns: {patterns_path} ({len(patterns)} patterns)")
 
 
 if __name__ == "__main__":

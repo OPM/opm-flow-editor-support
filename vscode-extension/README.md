@@ -88,6 +88,11 @@ Squiggles in the editor catch the most common deck-shape mistakes:
   per-record item count from the OPM Flow parser. Trailing defaults
   (auto-defaulted by `/`) are not flagged. The squiggle starts at the first
   offending value, including `N*` repeat tokens.
+- **Value-type mismatch** — a record value whose form is unambiguously wrong
+  for the parameter's declared `value_type`, e.g. a quoted string in a numeric
+  slot or a decimal in an integer slot. Deliberately conservative: bare
+  identifiers (which may be UDA/UDQ references) and enum-option mismatches are
+  never flagged, and defaults (`*`, `N*`) are always accepted.
 - **Missing per-record `/`** — a record line carrying values but no closing
   `/`, on keywords known to take records.
 - **Missing closing `/` on record-list blocks** — keywords like `WELSPECS`,
@@ -102,6 +107,13 @@ Squiggles in the editor catch the most common deck-shape mistakes:
 - **Lowercase keyword** — a line shaped like a keyword declaration whose
   upper-cased form is a known keyword. The reference manual states that
   lowercase keywords produce errors at simulation time.
+- **Missing required keyword** — a keyword whose `requires` partner (from
+  `opm-common`) is absent, e.g. a saturation-function table without its phase
+  keyword. Suppressed when the deck pulls in other files via
+  `INCLUDE`/`IMPORT`/`GDFILE` (the partner may live there) or has no section
+  header (an include fragment, not a complete deck).
+- **Mutually exclusive keywords** — two keywords that `opm-common` marks as
+  `prohibits` partners both appearing in the same deck.
 
 Keywords whose record bodies don't fit the generic model can be silenced
 wholesale via the `opm-flow.diagnostics.excludedKeywords` setting — see
@@ -347,6 +359,30 @@ The language is registered as `opm-flow`.
   uppercase a lowercase keyword, move an indented keyword to column 1, add a
   missing record / list / array terminator `/`, and replace an unrecognised
   keyword with its nearest known match.
+- **Value-type diagnostic** — record values are now checked against each
+  parameter's declared `opm-common` type; an unambiguous mismatch (a quoted
+  string in a numeric slot, a decimal in an integer slot) is flagged, while
+  bare identifiers and enum-option mismatches are left alone to avoid false
+  positives.
+- **Cross-keyword `requires` / `prohibits` diagnostics** — flags a keyword whose
+  required partner is missing from the deck, and a pair of mutually-exclusive
+  keywords that both appear. The `requires` check is suppressed for
+  include-based decks and bare include fragments.
+- **Fewer false positives on valid decks** — broadened keyword recognition and
+  relaxed terminator rules, validated against the
+  [OPM/opm-tests](https://github.com/OPM/opm-tests) corpus:
+  - More SUMMARY vectors are recognised rather than flagged as unknown
+    keywords: PROBE `deck_name`s, directional `KRNUM`/`IMBNUM` region variants,
+    L-modifier vectors (`WOPRL`, `LWWIR`), FIP region-set vectors (`ROIP_ABC`),
+    UDQ names (`WUOPRL`, `FU_VAR1`), and resolved `deck_name` aliases.
+  - Variadic-record list keywords (`VFPPROD`, `VFPINJ`, `RSVD`) no longer
+    require a separate closing `/`.
+  - The missing-record-terminator check is deferred until a record is actually
+    left unterminated, so a `/` placed on a later line is accepted.
+  - The wrong-section check is suppressed after an `INCLUDE`, whose file may
+    supply the section header.
+  - An indented unknown token under an active keyword is treated as record body
+    rather than flagged as an unknown keyword.
 
 ### 0.8.0
 

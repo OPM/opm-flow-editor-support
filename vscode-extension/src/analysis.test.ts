@@ -232,6 +232,41 @@ describe('computeDiagnostics — section validity', () => {
     expect(diags[0].endChar).toBe('WELSPECS'.length);
   });
 
+  it('suppresses the wrong-section check after an INCLUDE (sections may be split across files)', () => {
+    // SPE5-style master deck: RUNSPEC then an INCLUDE that pulls in the rest of
+    // the sections, followed by SCHEDULE keywords written in the master file.
+    const lines = [
+      'RUNSPEC',
+      'INCLUDE',
+      "  'SPE5.BASE' /",
+      'WELSPECS',         // SCHEDULE-only, but reachable via the included file
+      "  'W1' 'G' 1 1 /",
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => /is not valid in/.test(d.message))).toBe(false);
+  });
+
+  it('still flags a wrong-section keyword when no INCLUDE precedes it', () => {
+    const lines = ['RUNSPEC', 'WELSPECS', "  'W1' 'G' 1 1 /", '/'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => /is not valid in/.test(d.message))).toBe(true);
+  });
+
+  it('re-enables the wrong-section check after a later section header resets the INCLUDE state', () => {
+    const lines = [
+      'RUNSPEC',
+      'INCLUDE',
+      "  'grid.inc' /",
+      'GRID',             // explicit header resets the include-suppression
+      'WELSPECS',         // SCHEDULE-only, now genuinely wrong
+      "  'W1' 'G' 1 1 /",
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => /WELSPECS is not valid in GRID/.test(d.message))).toBe(true);
+  });
+
   it('does not flag a keyword in one of its valid sections', () => {
     const lines = ['SCHEDULE', 'WELSPECS', '/'];
     expect(computeDiagnostics(lines, index)).toEqual([]);
@@ -325,6 +360,37 @@ describe('computeDiagnostics — terminators', () => {
 
   it('does not flag a fixed-size record line that ends with /', () => {
     const lines = ['RUNSPEC', 'DIMENS', '10 10 10 /'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('accepts a fixed-size record whose terminating / is on its own line', () => {
+    // OPM Flow allows the '/' to sit on a line after the values
+    // (MINPV / PINCH / SPECGRID are commonly written this way).
+    const lines = ['RUNSPEC', 'DIMENS', '10 10 10', '/'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('accepts a fixed-size record split across several value lines before the /', () => {
+    const lines = ['RUNSPEC', 'DIMENS', '10', '10 10', '/'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('still flags a fixed-size record with no / before the next keyword', () => {
+    const lines = ['RUNSPEC', 'DIMENS', '10 10 10', 'OIL'];
+    const diags = computeDiagnostics(lines, index);
+    const recordDiag = diags.find(d => d.message.includes('missing the terminating'));
+    expect(recordDiag).toBeDefined();
+    expect(recordDiag!.line).toBe(2);
+  });
+
+  it('accepts a list record whose values and / are on separate lines', () => {
+    const lines = [
+      'SCHEDULE',
+      'WELSPECS',
+      "'W1' 'G' 1 1",
+      '/',                 // terminates the record
+      '/',                 // terminates the list
+    ];
     expect(computeDiagnostics(lines, index)).toEqual([]);
   });
 
@@ -459,6 +525,23 @@ describe('computeDiagnostics — terminators', () => {
     expect(arrDiag!.endChar).toBe('PORO'.length);
   });
 
+  it('does not require a closing / for a variadic-record list keyword (VFP-style)', () => {
+    // A VFP table is a record list whose final table record is closed by its
+    // own '/', with no separate standalone list terminator.
+    const vfp = {
+      VFPTAB: { name: 'VFPTAB', sections: ['SCHEDULE'], size_kind: 'list' as const, variadic_record: true },
+    };
+    const lines = [
+      'SCHEDULE',
+      'VFPTAB',
+      '1 2249 /',
+      '100 300 600 /',
+      '30 54 /',
+      '1 1 441.2 /',
+    ];
+    expect(computeDiagnostics(lines, vfp).some(d => /close the record list/.test(d.message))).toBe(false);
+  });
+
   it('flags both missing record terminator and missing list terminator', () => {
     const lines = [
       'SCHEDULE',
@@ -500,6 +583,87 @@ describe('computeDiagnostics — unknown keywords', () => {
     // Section keywords are recognised even when absent from the supplied index.
     const lines = ['RUNSPEC', 'GRID', 'PROPS', 'SCHEDULE'];
     expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('does not flag an indented well-name body under a SUMMARY vector as unknown', () => {
+    // A SUMMARY well vector takes a list of well names; when a single name sits
+    // on its own indented line ('  PROD2 /') it must be read as body content,
+    // not mistaken for an unknown keyword.
+    const local = {
+      ...index,
+      SOFR: { name: 'SOFR', sections: ['SUMMARY'], optional_body: true },
+    };
+    const lines = ['SUMMARY', 'SOFR', '  PROD1 /', '  PROD2 /', '/'];
+    expect(computeDiagnostics(lines, local).some(d => /not a recognised/.test(d.message))).toBe(false);
+  });
+
+  it('still flags an indented unknown token when no keyword block is active', () => {
+    const lines = ['RUNSPEC', '   FOOBAR'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => /FOOBAR is not a recognised/.test(d.message))).toBe(true);
+  });
+
+  it('does not flag user-defined quantity (UDQ) names as unknown', () => {
+    // UDQ names begin with a data-type letter followed by 'U'. They are
+    // user-defined (never in the index) but valid as bare SUMMARY mnemonics.
+    const lines = ['SUMMARY', 'FU_VAR1', 'FU_TIME', 'WU_WBHP', 'GUOPR'];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('still flags a typo that does not match the UDQ name shape', () => {
+    const lines = ['RUNSPEC', 'WELSPECZ', '/'];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags.some(d => /not a recognised/.test(d.message))).toBe(true);
+  });
+
+  it('does not flag region summary vectors qualified by a FIP region-set name', () => {
+    // ROIP (region oil in place) is a region vector; ROIP_ABC adds the named
+    // FIP region set "ABC". The base must exist in the index.
+    const local = { ...index, ROIP: { name: 'ROIP', sections: ['SUMMARY'] } };
+    const lines = ['SUMMARY', 'ROIP_ABC'];
+    expect(computeDiagnostics(lines, local).some(d => /ROIP_ABC.*not a recognised/.test(d.message))).toBe(false);
+  });
+
+  it('does not flag L-modifier summary vectors built on an indexed base', () => {
+    const local = {
+      ...index,
+      WOPR: { name: 'WOPR', sections: ['SUMMARY'] },
+      WWIR: { name: 'WWIR', sections: ['SUMMARY'] },
+    };
+    // WOPRL = WOPR + trailing L (completion-level); LWWIR = leading L + WWIR (LGR-local).
+    const lines = ['SUMMARY', 'WOPRL', 'LWWIR'];
+    expect(computeDiagnostics(lines, local).some(d => /not a recognised/.test(d.message))).toBe(false);
+  });
+
+  it('recognises summary-vector family tokens via supplied deck_name_regex patterns', () => {
+    // Tracer/water-cut family patterns from opm-common deck_name_regex,
+    // anchored as the extension does before calling computeDiagnostics.
+    const patterns = [/^(?:WTPR.+|WTPT.+)$/];
+    const lines = ['SUMMARY', 'WTPRTR1', 'WTPTTR1'];
+    expect(computeDiagnostics(lines, index, undefined, patterns)
+      .some(d => /not a recognised/.test(d.message))).toBe(false);
+  });
+
+  it('still flags a token that matches no supplied pattern', () => {
+    const patterns = [/^(?:WTPR.+)$/];
+    const lines = ['SUMMARY', 'NOPE'];
+    expect(computeDiagnostics(lines, index, undefined, patterns)
+      .some(d => /NOPE.*not a recognised/.test(d.message))).toBe(true);
+  });
+
+  it('still flags an L-suffixed token whose stripped base is not a summary vector', () => {
+    // "CONTROL" -> base "CONTRO" is not an indexed SUMMARY vector, so it is
+    // still reported rather than silently accepted.
+    const lines = ['SUMMARY', 'CONTROL'];
+    expect(computeDiagnostics(lines, index).some(d => /CONTROL.*not a recognised/.test(d.message))).toBe(true);
+  });
+
+  it('still flags an underscore-suffixed token whose base is not a region vector', () => {
+    // WOPR_X: base WOPR is a well (W) vector, not a region (R) vector, so the
+    // region-set rule does not apply and the typo is still reported.
+    const local = { ...index, WOPR: { name: 'WOPR', sections: ['SUMMARY'] } };
+    const lines = ['SUMMARY', 'WOPR_X'];
+    expect(computeDiagnostics(lines, local).some(d => /WOPR_X.*not a recognised/.test(d.message))).toBe(true);
   });
 
   it('does not flag keywords on the exclusion list', () => {
@@ -1209,6 +1373,336 @@ describe('computeDiagnostics — TUNING (issue #12)', () => {
     // The only legitimate diagnostic candidate would be on WELSPECS itself,
     // but it's a valid SCHEDULE keyword closed by '/', so no diagnostics.
     expect(diags).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Positional value-type checking (plan item 2)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — positional value types', () => {
+  const typedIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    // Four INT positions (ACTDIMS-shaped).
+    ACTDIMS: {
+      name: 'ACTDIMS',
+      sections: ['RUNSPEC'],
+      size_kind: 'fixed',
+      expected_columns: 4,
+      parameters: [
+        { index: 1, name: 'MAX_ACTION', value_type: 'INT' },
+        { index: 2, name: 'MAX_LINES', value_type: 'INT' },
+        { index: 3, name: 'MAX_COND', value_type: 'INT' },
+        { index: 4, name: 'MAX_CHAR', value_type: 'INT' },
+      ],
+    },
+    // Mixed STRING / INT / enum / DOUBLE positions (COMPDAT-shaped; only a
+    // few positions carry a parameter so unmapped columns are skipped).
+    COMPDAT: {
+      name: 'COMPDAT',
+      sections: ['SCHEDULE'],
+      size_kind: 'list',
+      parameters: [
+        { index: 1, name: 'WELL', value_type: 'STRING' },
+        { index: 2, name: 'I', value_type: 'INT' },
+        { index: 3, name: 'J', value_type: 'INT' },
+        { index: 6, name: 'STATUS', value_type: 'STRING', options: ['OPEN', 'SHUT', 'AUTO'] },
+        { index: 8, name: 'CF', value_type: 'DOUBLE' },
+      ],
+    },
+  };
+
+  it('flags a decimal in an INT slot', () => {
+    const lines = ['RUNSPEC', 'ACTDIMS', '1 2.5 3 4 /'];
+    const diags = computeDiagnostics(lines, typedIndex);
+    const d = diags.find(x => /MAX_LINES expects an integer/.test(x.message));
+    expect(d).toBeDefined();
+    expect(d!.line).toBe(2);
+    expect(d!.startChar).toBe('1 '.length);
+    expect(d!.endChar).toBe('1 2.5'.length);
+  });
+
+  it('flags a quoted string in an INT slot', () => {
+    const lines = ['RUNSPEC', 'ACTDIMS', "1 'X' 3 4 /"];
+    const diags = computeDiagnostics(lines, typedIndex);
+    expect(diags.some(x => /MAX_LINES expects an integer; got a quoted string/.test(x.message))).toBe(true);
+  });
+
+  it('accepts integers and defaults in INT slots', () => {
+    const lines = ['RUNSPEC', 'ACTDIMS', '1 1* 3 4 /'];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+
+  it('accepts a repeat-value with an integer value', () => {
+    // 2*3 fills positions 1-2 with the integer 3.
+    const lines = ['RUNSPEC', 'ACTDIMS', '2*3 1 4 /'];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+
+  it('flags a repeat-value whose value is a decimal in an INT slot', () => {
+    const lines = ['RUNSPEC', 'ACTDIMS', '2*2.5 1 4 /'];
+    const diags = computeDiagnostics(lines, typedIndex);
+    expect(diags.some(x => /expects an integer; got '2.5'/.test(x.message))).toBe(true);
+  });
+
+  it('does not flag enum values against a (heuristic) option set', () => {
+    // The option sets are extracted from manual prose and are often
+    // incomplete/abbreviated, so enum mismatches are deliberately NOT
+    // diagnosed — even an obvious typo like OPNE is left alone.
+    const lines = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPNE 1* 100.0 /", '/'];
+    expect(computeDiagnostics(lines, typedIndex).some(x => /OPNE/.test(x.message))).toBe(false);
+  });
+
+  it('accepts string values (bare or quoted) in STRING slots', () => {
+    const bare = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPEN 1* 100.0 /", '/'];
+    const quoted = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* 'SHUT' 1* 100.0 /", '/'];
+    expect(computeDiagnostics(bare, typedIndex)).toEqual([]);
+    expect(computeDiagnostics(quoted, typedIndex)).toEqual([]);
+  });
+
+  it('treats a blank quoted token as a default, not a type error', () => {
+    // `''` / `'  '` are placeholder defaults — must not trip the numeric check.
+    const lines = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPEN 1* '  ' /", '/'];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+
+  it('flags a quoted string in a DOUBLE slot', () => {
+    const lines = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPEN 1* 'x' /", '/'];
+    const diags = computeDiagnostics(lines, typedIndex);
+    expect(diags.some(x => /CF expects a number; got a quoted string/.test(x.message))).toBe(true);
+  });
+
+  it('accepts a numeric (incl. scientific) DOUBLE value', () => {
+    const lines = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPEN 1* 1.5e-3 /", '/'];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+
+  it('leaves a bare identifier (UDA/UDQ) in a DOUBLE slot alone', () => {
+    // A DOUBLE position may carry a UDA reference name the engine cannot
+    // resolve — these must not be flagged.
+    const lines = ['SCHEDULE', 'COMPDAT', "'W1' 1 1 1* 1* OPEN 1* WULPR /", '/'];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+
+  it('does not type-check columns beyond the mapped parameters', () => {
+    // ACTDIMS has 4 INT params; a 5th value is an arity overflow, not a
+    // type error (no parameter maps to column 5).
+    const lines = ['RUNSPEC', 'ACTDIMS', '1 2 3 4 5 /'];
+    const diags = computeDiagnostics(lines, typedIndex);
+    expect(diags.some(x => /expects an integer/.test(x.message))).toBe(false);
+    expect(diags.some(x => /expected at most 4/.test(x.message))).toBe(true);
+  });
+
+  it('uses the matching record for multi-record keywords', () => {
+    const multi: Record<string, AnalysisEntry> = {
+      ...typedIndex,
+      WELSEGS: {
+        name: 'WELSEGS',
+        sections: ['SCHEDULE'],
+        size_kind: 'list',
+        records_meta: [{ expected_columns: 2 }, { expected_columns: 2 }],
+        parameters: [
+          { index: 1, record: 1, name: 'WELL', value_type: 'STRING' },
+          { index: 2, record: 1, name: 'TOPDEP', value_type: 'DOUBLE' },
+          { index: 1, record: 2, name: 'SEG1', value_type: 'INT' },
+          { index: 2, record: 2, name: 'SEG2', value_type: 'INT' },
+        ],
+      },
+    };
+    // Record 1 col 2 is DOUBLE (1234.5 ok); record 2 col 1 is INT, given a
+    // decimal → flagged against the record-2 parameter, not record-1's.
+    const lines = [
+      'SCHEDULE',
+      'WELSEGS',
+      "'W1' 1234.5 /",
+      '2.5 3 /',
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, multi);
+    expect(diags.some(x => /SEG1 expects an integer; got '2.5'/.test(x.message))).toBe(true);
+    expect(diags.some(x => /TOPDEP/.test(x.message))).toBe(false);
+  });
+
+  it('skips type checks for variadic-record keywords', () => {
+    const variadic: Record<string, AnalysisEntry> = {
+      ...typedIndex,
+      RSVD: {
+        name: 'RSVD',
+        sections: ['SOLUTION'],
+        size_kind: 'fixed',
+        variadic_record: true,
+        parameters: [{ index: 1, name: 'DATA', value_type: 'DOUBLE' }],
+      },
+    };
+    const lines = ['SOLUTION', 'RSVD', " 'oops' 156.3 /"];
+    expect(computeDiagnostics(lines, variadic).some(x => /expects a number/.test(x.message))).toBe(false);
+  });
+
+  it('skips keywords without parameter data', () => {
+    const lines = ['RUNSPEC', 'BARE', "1 2.5 'x' /"];
+    expect(computeDiagnostics(lines, typedIndex)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-keyword constraints — requires / prohibits (plan item 1)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — requires / prohibits', () => {
+  // BRANPROP requires NETWORK and prohibits GRUPNET (opm-common). AQUCT
+  // requires AQUDIMS. THERMAL/TEMP are mutually exclusive — only THERMAL
+  // declares the prohibition in opm-common, so the engine must report it
+  // from whichever side carries the field.
+  const xIndex: Record<string, AnalysisEntry> = {
+    ...index,
+    BRANPROP: {
+      name: 'BRANPROP',
+      sections: ['SCHEDULE'],
+      size_kind: 'list',
+      requires: ['NETWORK'],
+      prohibits: ['GRUPNET'],
+    },
+    NETWORK: { name: 'NETWORK', sections: ['RUNSPEC'], size_kind: 'fixed', size_count: 1 },
+    GRUPNET: { name: 'GRUPNET', sections: ['SCHEDULE'], size_kind: 'list' },
+    AQUCT: { name: 'AQUCT', sections: ['SOLUTION'], size_kind: 'list', requires: ['AQUDIMS'] },
+    AQUDIMS: { name: 'AQUDIMS', sections: ['RUNSPEC'], size_kind: 'fixed', size_count: 1 },
+    THERMAL: { name: 'THERMAL', sections: ['RUNSPEC'], size_kind: 'none', prohibits: ['TEMP'] },
+    TEMP: { name: 'TEMP', sections: ['PROPS'], size_kind: 'array' },
+  };
+
+  it('flags a keyword whose required partner is missing', () => {
+    const lines = ['SCHEDULE', 'BRANPROP', '/'];
+    const diags = computeDiagnostics(lines, xIndex);
+    const req = diags.find(d => /requires NETWORK/.test(d.message));
+    expect(req).toBeDefined();
+    expect(req!.line).toBe(1);
+    expect(req!.startChar).toBe(0);
+    expect(req!.endChar).toBe('BRANPROP'.length);
+  });
+
+  it('does not flag when the required partner is present', () => {
+    const lines = [
+      'RUNSPEC',
+      'NETWORK',
+      '5 5 /',
+      'SCHEDULE',
+      'BRANPROP',
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, xIndex);
+    expect(diags.some(d => /requires NETWORK/.test(d.message))).toBe(false);
+  });
+
+  it('suppresses the requires check for a fragment with no section header', () => {
+    // A bare SCAL/grid include (no RUNSPEC header) legitimately omits the
+    // phase keywords its tables "require"; flagging them would be noise.
+    const lines = ['BRANPROP', '/'];
+    const diags = computeDiagnostics(lines, xIndex);
+    expect(diags.some(d => /requires NETWORK/.test(d.message))).toBe(false);
+  });
+
+  it('suppresses the requires check when the deck pulls in an INCLUDE file', () => {
+    // NETWORK may be defined in the included file, so don't cry wolf.
+    const lines = [
+      'RUNSPEC',
+      'INCLUDE',
+      "  'props.inc' /",
+      'SCHEDULE',
+      'BRANPROP',
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, xIndex);
+    expect(diags.some(d => /requires NETWORK/.test(d.message))).toBe(false);
+  });
+
+  it('anchors the diagnostic on an indented requiring keyword token', () => {
+    // (Indented keywords also get a column-1 diagnostic; the requires one
+    // must still point at the token, not the indent.)
+    const lines = ['SCHEDULE', '  BRANPROP', '/'];
+    const diags = computeDiagnostics(lines, xIndex);
+    const req = diags.find(d => /requires NETWORK/.test(d.message));
+    expect(req).toBeDefined();
+    expect(req!.startChar).toBe(2);
+    expect(req!.endChar).toBe(2 + 'BRANPROP'.length);
+  });
+
+  it('suppresses phase requirements under an implicit-phase mode (CO2STORE)', () => {
+    // CO2STORE activates water+gas without the explicit WATER/GAS keywords,
+    // so SWFN's "requires WATER" must not fire (regression: co2store deck).
+    const co2: Record<string, AnalysisEntry> = {
+      ...xIndex,
+      CO2STORE: { name: 'CO2STORE', sections: ['RUNSPEC'], size_kind: 'none' },
+      SWFN: { name: 'SWFN', sections: ['PROPS'], size_kind: 'list', requires: ['WATER'] },
+      WATER: { name: 'WATER', sections: ['RUNSPEC'], size_kind: 'none' },
+    };
+    const lines = ['RUNSPEC', 'CO2STORE', 'PROPS', 'SWFN', "0.1 0.0 /", '/'];
+    const diags = computeDiagnostics(lines, co2);
+    expect(diags.some(d => /requires WATER/.test(d.message))).toBe(false);
+  });
+
+  it('still flags a phase requirement when no implicit-phase mode is present', () => {
+    const plain: Record<string, AnalysisEntry> = {
+      ...xIndex,
+      SWFN: { name: 'SWFN', sections: ['PROPS'], size_kind: 'list', requires: ['WATER'] },
+      WATER: { name: 'WATER', sections: ['RUNSPEC'], size_kind: 'none' },
+    };
+    const lines = ['PROPS', 'SWFN', '0.1 0.0 /', '/'];
+    const diags = computeDiagnostics(lines, plain);
+    expect(diags.some(d => /SWFN requires WATER/.test(d.message))).toBe(true);
+  });
+
+  it('flags a prohibits conflict when both keywords are present', () => {
+    const lines = [
+      'SCHEDULE',
+      'BRANPROP',
+      '/',
+      'GRUPNET',
+      "'FIELD' 1* 1* /",
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, xIndex);
+    const con = diags.find(d => /BRANPROP cannot be used together with GRUPNET/.test(d.message));
+    expect(con).toBeDefined();
+    expect(con!.line).toBe(1);
+  });
+
+  it('does not flag a prohibits conflict when the partner is absent', () => {
+    const lines = ['SCHEDULE', 'BRANPROP', '/', 'GRUPTREE', '/'];
+    const diags = computeDiagnostics(lines, xIndex);
+    expect(diags.some(d => /cannot be used together/.test(d.message))).toBe(false);
+  });
+
+  it('reports a prohibits pair only once even when declared from one side', () => {
+    // THERMAL declares prohibits: [TEMP]; TEMP carries no prohibits field.
+    const lines = ['RUNSPEC', 'THERMAL', 'PROPS', 'TEMP', '0.1 /'];
+    const diags = computeDiagnostics(lines, xIndex);
+    const conflicts = diags.filter(d => /mutually exclusive/.test(d.message));
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].message).toMatch(/THERMAL cannot be used together with TEMP/);
+  });
+
+  it('reports each requirement independently for a multi-requires keyword', () => {
+    const multi: Record<string, AnalysisEntry> = {
+      ...xIndex,
+      NODEPROP: {
+        name: 'NODEPROP',
+        sections: ['SCHEDULE'],
+        size_kind: 'list',
+        requires: ['NETWORK', 'BRANPROP'],
+      },
+    };
+    // NETWORK present, BRANPROP missing → exactly one requires diagnostic.
+    const lines = ['RUNSPEC', 'NETWORK', '5 5 /', 'SCHEDULE', 'NODEPROP', '/'];
+    const diags = computeDiagnostics(lines, multi);
+    const reqs = diags.filter(d => /NODEPROP requires/.test(d.message));
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0].message).toMatch(/requires BRANPROP/);
+  });
+
+  it('keeps quiet for keywords with no constraints', () => {
+    const lines = ['RUNSPEC', 'NETWORK', '5 5 /', 'AQUDIMS', '1 2 /'];
+    const diags = computeDiagnostics(lines, xIndex);
+    expect(diags.some(d => /requires|cannot be used together|mutually exclusive/.test(d.message))).toBe(false);
   });
 });
 

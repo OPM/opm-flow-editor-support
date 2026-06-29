@@ -34,6 +34,9 @@ from build_keyword_index import (
     load_opm_common_index,
     merge_opm_common,
     synthesize_opm_only_entries,
+    expand_probe_deck_names,
+    collect_deck_name_regexes,
+    add_directional_variants,
     extract_string_options,
     attach_string_options,
     _opm_item_for_param,
@@ -653,6 +656,18 @@ class TestLoadOpmCommonIndex:
         idx = load_opm_common_index(tmp_path)
         assert idx == {}
 
+    def test_loads_requires_and_prohibits(self, tmp_path):
+        self._write_kw(tmp_path, "000_Eclipse100", "B", "BRANPROP", {
+            "name": "BRANPROP",
+            "sections": ["SCHEDULE"],
+            "requires": ["NETWORK"],
+            "prohibits": ["GRUPNET"],
+            "items": [],
+        })
+        idx = load_opm_common_index(tmp_path)
+        assert idx["BRANPROP"]["requires"] == ["NETWORK"]
+        assert idx["BRANPROP"]["prohibits"] == ["GRUPNET"]
+
     def test_title_size_kind_overridden_to_none(self, tmp_path):
         # opm-common describes TITLE as size:1 with a single size_type:ALL
         # STRING item — the generic classifier would call this fixed/1 and
@@ -793,6 +808,37 @@ class TestMergeOpmCommon:
         merge_opm_common(index, {})  # no opm-common entry
         assert "value_type" not in index["OBSCURE"]["parameters"][0]
         assert "sections_opm" not in index["OBSCURE"]
+
+    def test_requires_and_prohibits_copied_from_opm_common(self):
+        # AQUCT requires AQUDIMS; BRANPROP requires NETWORK and prohibits GRUPNET.
+        index = {"BRANPROP": self._manual_entry(sections=("SCHEDULE",))}
+        opm = {"BRANPROP": {
+            "sections": ["SCHEDULE"],
+            "items": [],
+            "requires": ["NETWORK"],
+            "prohibits": ["GRUPNET"],
+        }}
+        merge_opm_common(index, opm)
+        assert index["BRANPROP"]["requires"] == ["NETWORK"]
+        assert index["BRANPROP"]["prohibits"] == ["GRUPNET"]
+
+    def test_requires_prohibits_omitted_when_absent(self):
+        index = {"ACTDIMS": self._manual_entry()}
+        opm = {"ACTDIMS": {"sections": ["RUNSPEC"], "items": []}}
+        merge_opm_common(index, opm)
+        assert "requires" not in index["ACTDIMS"]
+        assert "prohibits" not in index["ACTDIMS"]
+
+    def test_requires_prohibits_set_on_all_list_form_entries(self):
+        e1 = self._manual_entry(sections=("RUNSPEC",))
+        e2 = self._manual_entry(sections=("GRID",))
+        index = {"KW": [e1, e2]}
+        opm = {"KW": {"sections": ["RUNSPEC", "GRID"], "items": [],
+                      "requires": ["DEP"], "prohibits": ["FOE"]}}
+        merge_opm_common(index, opm)
+        for e in index["KW"]:
+            assert e["requires"] == ["DEP"]
+            assert e["prohibits"] == ["FOE"]
 
     def test_merge_handles_list_form_entries(self):
         # Multi-section keywords are stored as a list of entries
@@ -1002,6 +1048,19 @@ class TestSynthesizeOpmOnly:
         added = synthesize_opm_only_entries(index, opm)
         assert added == 0
         assert index["EXISTING"]["summary"] == "kept"
+
+    def test_synthesized_entry_carries_requires_and_prohibits(self):
+        # THERMEXR is an OPM-only keyword that prohibits THELCOEF.
+        index: dict = {}
+        opm = {"THERMEXR": {
+            "sections": ["GRID"],
+            "items": [],
+            "data": {"value_type": "DOUBLE"},
+            "prohibits": ["THELCOEF"],
+        }}
+        synthesize_opm_only_entries(index, opm)
+        assert index["THERMEXR"]["prohibits"] == ["THELCOEF"]
+        assert "requires" not in index["THERMEXR"]
 
     def test_synthesized_entry_with_no_items_has_empty_params(self):
         index: dict = {}
@@ -1374,3 +1433,69 @@ class TestAttachStringOptions:
         assert index["K"]["parameters"][0]["options"] == ["GAS", "OIL", "WAT"]
         assert "options" not in index["K"]["parameters"][1]
         assert "options" not in index["K"]["parameters"][2]  # not STRING
+
+
+class TestAddDirectionalVariants:
+    def test_emits_xyz_copies_for_base_keywords(self):
+        index = {
+            "KRNUM": {"name": "KRNUM", "sections": ["GRID"], "size_kind": "array"},
+        }
+        added = add_directional_variants(index)
+        assert added == 3
+        for suffix in ("X", "Y", "Z"):
+            name = f"KRNUM{suffix}"
+            assert name in index
+            assert index[name]["name"] == name
+            assert index[name]["sections"] == ["GRID"]
+
+    def test_is_a_deep_copy_not_a_shared_reference(self):
+        index = {"IMBNUM": {"name": "IMBNUM", "sections": ["REGIONS"]}}
+        add_directional_variants(index)
+        index["IMBNUMX"]["sections"].append("GRID")
+        assert index["IMBNUM"]["sections"] == ["REGIONS"]
+
+    def test_skips_missing_base_and_preexisting_variant(self):
+        index = {
+            "KRNUM": {"name": "KRNUM", "sections": ["GRID"]},
+            "KRNUMX": {"name": "KRNUMX", "sections": ["GRID"], "custom": True},
+        }
+        added = add_directional_variants(index)
+        # KRNUMX already present (kept untouched); only Y and Z added. IMBNUM absent.
+        assert added == 2
+        assert index["KRNUMX"].get("custom") is True
+
+
+class TestExpandProbeDeckNames:
+    def test_expands_deck_names_into_minimal_entries(self):
+        index = {}
+        opm = {
+            "WELL_PROBE": {
+                "sections": ["SUMMARY"],
+                "deck_names": ["WOPR", "WWIP", "WGIP"],
+                "comment": "Well summary vectors.\nSecond line.",
+            }
+        }
+        added = expand_probe_deck_names(index, opm)
+        assert added == 3
+        assert index["WWIP"]["name"] == "WWIP"
+        assert index["WWIP"]["sections_opm"] == ["SUMMARY"]
+        assert index["WWIP"]["summary"] == "Well summary vectors."
+        # No size shape -> no terminator/arity checks downstream.
+        assert "size_kind" not in index["WWIP"]
+
+    def test_does_not_overwrite_existing_entries(self):
+        index = {"WOPR": {"name": "WOPR", "summary": "from manual"}}
+        opm = {"WELL_PROBE": {"sections": ["SUMMARY"], "deck_names": ["WOPR", "WWIP"]}}
+        added = expand_probe_deck_names(index, opm)
+        assert added == 1
+        assert index["WOPR"]["summary"] == "from manual"
+
+    def test_collect_deck_name_regexes_dedupes(self):
+        opm = {
+            "A": {"deck_name_regex": "WU.+"},
+            "B": {"deck_name_regex": "WU.+"},
+            "C": {"deck_name_regex": "FU.+"},
+            "D": {},
+        }
+        rx = collect_deck_name_regexes(opm)
+        assert sorted(rx) == ["FU.+", "WU.+"]

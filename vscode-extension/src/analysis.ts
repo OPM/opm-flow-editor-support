@@ -27,10 +27,30 @@ export interface RecordMeta {
   expected_columns?: number;
 }
 
+/**
+ * Per-parameter shape consumed by the positional type-check. Mirrors the
+ * subset of the compact-index parameter object the diagnostics engine needs;
+ * the full object (description, units, default, …) is ignored here.
+ */
+export interface AnalysisParam {
+  /** 1-based record position, or a grouped string ("3-52") for variadic
+   *  ranges. Only integer positions are type-checked. */
+  index: number | string;
+  name?: string;
+  /** opm-common value type: INT | DOUBLE | STRING | RAW_STRING | UDA. */
+  value_type?: string;
+  /** Enum values for STRING parameters extracted from the manual. */
+  options?: string[];
+  /** 1-based record number for multi-record keywords. */
+  record?: number;
+}
+
 export interface AnalysisEntry {
   name: string;
   expected_columns?: number;
   records_meta?: RecordMeta[];
+  /** Per-parameter metadata used by the positional type-check. */
+  parameters?: AnalysisParam[];
   /** Authoritative section list (from opm-common when available). */
   sections?: string[];
   /**
@@ -78,6 +98,18 @@ export interface AnalysisEntry {
    * apply so a forgotten closing '/' still gets flagged.
    */
   optional_body?: boolean;
+  /**
+   * Keywords that must also appear in the deck when this one is used
+   * (opm-common ``requires``). Drives the "X requires Y" diagnostic. The
+   * check is document-wide and is suppressed when the deck pulls in other
+   * files via INCLUDE/IMPORT/GDFILE, since the required keyword may live there.
+   */
+  requires?: string[];
+  /**
+   * Keywords that may not co-exist with this one (opm-common ``prohibits``).
+   * Drives the "X conflicts with Y" diagnostic when both are present.
+   */
+  prohibits?: string[];
 }
 
 export type AnalysisIndex = Record<string, AnalysisEntry>;
@@ -189,6 +221,53 @@ function expectsMoreRecords(
  *  match unrelated tokens. */
 const TEMPLATE_SUFFIX_RE = /^[A-Z0-9]+$/;
 
+/**
+ * User-defined quantity (UDQ) name. OPM Flow requires a UDQ name to begin with
+ * the data-type letter (one of A B C F G R S W) followed by the letter ``U``
+ * (e.g. ``WUOPRL``, ``FU_VAR1``, ``WU_WBHP``). Such names are user-defined, so
+ * they can never appear in the keyword index, yet they show up legitimately as
+ * bare SUMMARY mnemonics and inside ACTIONX/UDQ bodies. We recognise them by
+ * shape so the unknown-keyword diagnostic doesn't flag them as typos.
+ */
+const UDQ_NAME_RE = /^[ABCFGRSW]U[A-Z0-9_]+$/;
+
+/**
+ * Region summary vector qualified by a named FIP region set, e.g. ``ROIP_ABC``
+ * (= base vector ``ROIP`` over region set ``ABC``) or ``RPR__ABC``. The base is
+ * a region vector (``R``-prefixed) that exists in the index; the ``_<NAME>``
+ * qualifier is user-defined so the full token never appears in the index.
+ */
+function isRegionSetVector(index: AnalysisIndex, kw: string): boolean {
+  const us = kw.indexOf('_');
+  if (us <= 0) return false;
+  const base = kw.slice(0, us);
+  if (base[0] !== 'R') return false;
+  return index[base] !== undefined;
+}
+
+/** True when `base` is an indexed keyword valid in the SUMMARY section. */
+function isSummaryBase(index: AnalysisIndex, base: string): boolean {
+  const e = index[base];
+  return !!e && Array.isArray(e.sections) && e.sections.includes('SUMMARY');
+}
+
+/**
+ * Summary vector formed by a standard modifier on a base vector that is itself
+ * an indexed SUMMARY vector:
+ *   - trailing 'L' — completion/connection-level variant (WOPRL = WOPR + L,
+ *     COPRL = COPR + L);
+ *   - leading 'L' — LGR-local variant (LWWIR = L + WWIR, LBOSAT = L + BOSAT).
+ * Requiring the stripped base to be a real SUMMARY vector keeps this from
+ * masking genuine typos, while covering the open-ended L-modifier families that
+ * opm-common does not enumerate.
+ */
+function isSummaryModifierVector(index: AnalysisIndex, kw: string): boolean {
+  if (kw.length < 4) return false;
+  if (kw.endsWith('L') && isSummaryBase(index, kw.slice(0, -1))) return true;
+  if (kw.startsWith('L') && isSummaryBase(index, kw.slice(1))) return true;
+  return false;
+}
+
 /** Resolve `kw` to an index entry, falling back to a templated-prefix
  *  match when no exact entry exists. Returns the *template's* entry —
  *  callers use it for shape (size_kind, etc.); the displayed keyword
@@ -233,12 +312,112 @@ function lineHasRecordTerminator(text: string, lastTokenEnd: number): boolean {
   return false;
 }
 
+// --- Positional value-type checking ---------------------------------------
+// Token shapes used to decide whether a record value is well-formed for the
+// parameter's declared opm-common type. Kept deliberately conservative: we
+// only flag values whose form is *unambiguously* wrong, never a bare
+// identifier against a numeric slot (it may be a UDA/UDQ reference or a macro
+// substitution the line-oriented engine cannot resolve).
+const INT_TOKEN_RE = /^[-+]?\d+$/;
+const NUMERIC_TOKEN_RE = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
+
+// Phase keywords that opm-common lists as `requires` targets (SWOF requires
+// OIL + WATER, SGFN requires GAS, …).
+const PHASE_KEYWORDS: ReadonlySet<string> = new Set([
+  'OIL', 'GAS', 'WATER', 'DISGAS', 'VAPOIL', 'VAPWAT', 'DISGASW',
+]);
+
+// Modes that activate a fixed phase set *without* the explicit phase keywords
+// above (CO2STORE = water + gas, H2STORE = water + gas, …). When one of these
+// is present the phase-keyword requirements are satisfied implicitly, so a
+// missing-phase diagnostic would be a false positive.
+const IMPLICIT_PHASE_MODE_KEYWORDS: ReadonlySet<string> = new Set([
+  'CO2STORE', 'CO2STOR', 'H2STORE',
+]);
+
+function isQuotedToken(t: string): boolean {
+  return t.startsWith("'");
+}
+
+function stripQuotes(t: string): string {
+  return isQuotedToken(t) ? t.replace(/^'/, '').replace(/'$/, '') : t;
+}
+
+/**
+ * Locate the parameter occupying 1-based record position `col` within the
+ * active record. Grouped/variadic indices (string form like "3-52") are not
+ * type-checked, so only integer positions match.
+ */
+function paramAtPosition(
+  entry: AnalysisEntry,
+  record: number,
+  col: number,
+): AnalysisParam | undefined {
+  const params = entry.parameters;
+  if (!params) return undefined;
+  const multi = !!entry.records_meta;
+  for (const p of params) {
+    if (multi && (p.record ?? 1) !== record) continue;
+    if (typeof p.index === 'number' && p.index === col) return p;
+  }
+  return undefined;
+}
+
+/**
+ * Return a diagnostic message for a record value that does not match its
+ * parameter's declared type/options, or null when the value is acceptable.
+ * `raw` is the verbatim token (a repeat-value's count prefix already stripped
+ * by the caller; pure defaults are never passed in).
+ */
+function valueTypeError(
+  param: AnalysisParam,
+  raw: string,
+  kwName: string,
+): string | null {
+  const quoted = isQuotedToken(raw);
+  const val = stripQuotes(raw);
+
+  // A blank or whitespace-only token (e.g. `''` or `'   '`) is a placeholder
+  // for a defaulted value — never a type error.
+  if (val.trim() === '') return null;
+
+  // NB: an enum (`options[]`) mismatch is deliberately NOT flagged. The option
+  // sets are extracted heuristically from the manual prose and are frequently
+  // incomplete or abbreviated (e.g. WCONINJE's phase lists "WAT" rather than
+  // the valid "WATER"), so flagging values outside the set produced thousands
+  // of false positives on the known-good opm-tests corpus. Options remain in
+  // the index for *completions*, where being incomplete is harmless.
+
+  switch (param.value_type) {
+    case 'INT':
+      if (quoted) {
+        return `${kwName}: ${param.name ?? 'value'} expects an integer; got a quoted string.`;
+      }
+      if (INT_TOKEN_RE.test(val)) return null;
+      if (NUMERIC_TOKEN_RE.test(val)) {
+        return `${kwName}: ${param.name ?? 'value'} expects an integer; got '${val}'.`;
+      }
+      return null; // bare names left alone (UDA/UDQ/macro)
+    case 'DOUBLE':
+      if (quoted) {
+        return `${kwName}: ${param.name ?? 'value'} expects a number; got a quoted string.`;
+      }
+      return null; // numeric ok; bare names left alone
+    default:
+      return null; // STRING / RAW_STRING / UDA / unknown: accept any token
+  }
+}
+
 /**
  * Walk a document and emit line-level diagnostics:
  *
  * - **Arity**: a record with more values than the keyword's per-record
  *   item count (from opm-common). Too-few values are not flagged because
  *   OPM Flow auto-defaults trailing positions before the `/`.
+ * - **Value type**: a record value whose form is unambiguously wrong for the
+ *   matching item's declared `value_type` (a quoted string in a numeric slot,
+ *   a decimal in an `INT` slot) or, for `STRING` items with an `options[]`
+ *   set, a value outside that set. Defaults (`*`, `N*`) are always accepted.
  * - **Section validity**: a keyword whose authoritative `sections` list
  *   does not include the section currently in scope.
  * - **Record terminator**: a record line that has values but is missing
@@ -259,6 +438,13 @@ export function computeDiagnostics(
   lines: string[],
   index: AnalysisIndex,
   excludedKeywords: ReadonlySet<string> = DIAGNOSTICS_EXCLUDED_KEYWORDS,
+  /**
+   * Anchored regexes for open-ended summary-vector families (UDQ, tracer,
+   * water-cut-bucket mnemonics) from opm-common's `deck_name_regex`. A token
+   * matching one of these is a recognised SUMMARY vector and is not flagged as
+   * an unknown keyword. Each regex should already be anchored (`^…$`).
+   */
+  summaryNamePatterns: readonly RegExp[] = [],
 ): LineDiagnostic[] {
   const out: LineDiagnostic[] = [];
   let activeKw: AnalysisEntry | null = null;
@@ -272,12 +458,59 @@ export function computeDiagnostics(
   let currentRecord = 1;
   let lastRecordLine = -1;
   let lastRecordEndChar = 0;
+  // An "open" record is one whose value tokens have been seen but whose
+  // terminating '/' has not yet appeared. OPM Flow lets a record's '/' sit on
+  // a later line (`MINPV` <nl> ` 10` <nl> `/`), so we defer the
+  // missing-terminator diagnostic until the record is closed (by a '/') or the
+  // block ends with it still open. -1 means no record is currently open.
+  let openRecordLine = -1;
+  let openRecordStart = 0;
+  let openRecordEnd = 0;
   let listTerminatorSeen = false;
   let arrayTerminatorSeen = false;
   let currentSection: string | null = null;
+  // True once an INCLUDE/IMPORT/GDFILE has appeared since the last section
+  // header. An included file may itself contain section headers (decks
+  // routinely split SECTIONS across includes — e.g. RUNSPEC in the master
+  // deck, the rest pulled in via INCLUDE), so once we've seen one we can no
+  // longer trust `currentSection` and must suppress the wrong-section check.
+  let includeSinceSection = false;
+  // First occurrence of each recognised keyword (by canonical entry name),
+  // collected during the walk and evaluated once at the end for the
+  // document-wide requires/prohibits constraints.
+  const seenKeywords = new Map<
+    string,
+    { entry: AnalysisEntry; line: number; startChar: number; endChar: number }
+  >();
+  // True once any file-loading keyword (INCLUDE/IMPORT/GDFILE) has appeared
+  // anywhere in the deck. A `requires` partner may live in an included file,
+  // so the missing-requirement check is suppressed when this is set.
+  let hasIncludeKeyword = false;
+  // True once any section header has appeared. The `requires` check only
+  // makes sense on a complete deck; an INCLUDE *fragment* (a bare .inc/.grdecl
+  // with no section header) legitimately omits the RUNSPEC phase keywords its
+  // tables "require", so the check is suppressed when no section is present.
+  let sawSectionHeader = false;
 
   const closeKw = (): void => {
     if (!activeKw) return;
+    // A record left open at the block boundary (no '/' before the next keyword,
+    // section header, or end of file) is a genuine missing terminator. Flag it
+    // for record-taking keywords; variadic-record keywords are exempt (their
+    // records legitimately span many lines and are not '/'-per-line).
+    if (
+      openRecordLine >= 0 &&
+      !activeKw.variadic_record &&
+      (activeKw.size_kind === 'fixed' || activeKw.size_kind === 'list')
+    ) {
+      out.push({
+        line: openRecordLine,
+        startChar: openRecordStart,
+        endChar: openRecordEnd,
+        message: `${activeKw.name}: record is missing the terminating '/'.`,
+        code: 'missing-record-terminator',
+      });
+    }
     // Optional-body keywords (non-F SUMMARY mnemonics) may appear bare
     // and stacked, so a block that consumed no records doesn't need a
     // closing '/'. Once values are present the normal array/list rule
@@ -285,6 +518,10 @@ export function computeDiagnostics(
     const bareOptionalBody = activeKw.optional_body && recordCount === 0;
     const needsTerminator =
       !bareOptionalBody
+      // Variadic-record keywords (VFPPROD, VFPINJ, RSVD, …) have a table-style
+      // final record that is closed by its own per-record '/', not by a
+      // separate standalone list terminator — so they need no closing '/'.
+      && !activeKw.variadic_record
       && (
         (activeKw.size_kind === 'list' && !listTerminatorSeen) ||
         (activeKw.size_kind === 'array' && !arrayTerminatorSeen)
@@ -319,6 +556,9 @@ export function computeDiagnostics(
     lastRecordEndChar = 0;
     listTerminatorSeen = false;
     arrayTerminatorSeen = false;
+    openRecordLine = -1;
+    openRecordStart = 0;
+    openRecordEnd = 0;
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -326,10 +566,20 @@ export function computeDiagnostics(
     if (isCommentLine(text)) continue;
     if (text.trim() === '') continue;
 
-    // A line that is just '/' (with optional comment) is the list terminator.
+    // A line that is just '/' (with optional comment). When a record is open
+    // (its values were on previous lines) this '/' terminates that record. When
+    // no record is open it is the block terminator that closes a record list or
+    // value array.
     if (isStandaloneTerminator(text)) {
-      if (activeKw?.size_kind === 'list') listTerminatorSeen = true;
-      if (activeKw?.size_kind === 'array') arrayTerminatorSeen = true;
+      if (openRecordLine >= 0) {
+        openRecordLine = -1;
+        if (activeKw?.records_meta) {
+          currentRecord = Math.min(currentRecord + 1, activeKw.records_meta.length);
+        }
+      } else {
+        if (activeKw?.size_kind === 'list') listTerminatorSeen = true;
+        if (activeKw?.size_kind === 'array') arrayTerminatorSeen = true;
+      }
       continue;
     }
 
@@ -350,6 +600,8 @@ export function computeDiagnostics(
       }
       closeKw();
       currentSection = section.name;
+      sawSectionHeader = true;
+      includeSinceSection = false;
       continue;
     }
 
@@ -394,9 +646,21 @@ export function computeDiagnostics(
       const entry = lookupEntry(index, kw);
       const treatAsRecord =
         activeKw !== null
-        && (!entry || indent > 0)
         && !excludedKeywords.has(kw)
-        && expectsMoreRecords(activeKw, recordCount, listTerminatorSeen, arrayTerminatorSeen);
+        && (
+          // An indented token that is not a known keyword cannot be a keyword
+          // at all (OPM only recognises keywords in column 1), so it is record
+          // body of the active block — e.g. a single well name '  PROD2 /'
+          // under a SUMMARY vector that does not "expect more records". Without
+          // this it would be mis-flagged as an unknown keyword.
+          (indent > 0 && !entry)
+          // Otherwise a single uppercase token continues the block as an
+          // unquoted string value only while it still expects records: a
+          // column-1 unknown token, or an indented token whose name happens to
+          // match a keyword (THPRES under EQLOPTS).
+          || ((!entry || indent > 0)
+              && expectsMoreRecords(activeKw, recordCount, listTerminatorSeen, arrayTerminatorSeen))
+        );
 
       if (!treatAsRecord) {
         closeKw();
@@ -430,6 +694,19 @@ export function computeDiagnostics(
         // typo. Flag and stop tracking — there's no parser data to validate the
         // record body against anyway.
         if (!activeKw) {
+          // User-defined quantity names (WUOPRL, FU_VAR1, …) are recognised by
+          // shape: they are user-defined and so never appear in the index, but
+          // are valid as bare SUMMARY mnemonics and in ACTIONX/UDQ bodies.
+          if (UDQ_NAME_RE.test(kw)) continue;
+          // Region summary vectors qualified by a named FIP region set
+          // (ROIP_ABC, RPR__ABC) are likewise user-qualified and not indexed.
+          if (isRegionSetVector(index, kw)) continue;
+          // Standard L-modifier summary vectors (WOPRL completion-level,
+          // LWWIR LGR-local) built on an indexed SUMMARY base vector.
+          if (isSummaryModifierVector(index, kw)) continue;
+          // Open-ended summary-vector families from opm-common's
+          // deck_name_regex (UDQ, tracer, water-cut-bucket mnemonics).
+          if (summaryNamePatterns.some(re => re.test(kw))) continue;
           out.push({
             line: i,
             startChar: activeKwIndent,
@@ -441,10 +718,33 @@ export function computeDiagnostics(
           continue;
         }
 
-        // Section-validity check
+        // Record the first occurrence of this keyword for the document-wide
+        // requires/prohibits checks. Keyed by the canonical entry name so a
+        // templated deck token (FTPRSEA) maps to its base (FTPR); the range
+        // still points at the literal token in the deck.
+        if (!seenKeywords.has(activeKw.name)) {
+          seenKeywords.set(activeKw.name, {
+            entry: activeKw,
+            line: i,
+            startChar: activeKwIndent,
+            endChar: activeKwIndent + kw.length,
+          });
+        }
+
+        // A file-loading keyword may pull in section headers from another
+        // file, after which `currentSection` can no longer be trusted.
+        if (kw === 'INCLUDE' || kw === 'IMPORT' || kw === 'GDFILE') {
+          includeSinceSection = true;
+          hasIncludeKeyword = true;
+        }
+
+        // Section-validity check. Suppressed once an INCLUDE/IMPORT/GDFILE has
+        // appeared since the last section header, to avoid false positives on
+        // decks whose sections are split across included files.
         if (
           activeKw?.sections?.length &&
           currentSection &&
+          !includeSinceSection &&
           !activeKw.sections.includes(currentSection)
         ) {
           out.push({
@@ -498,23 +798,45 @@ export function computeDiagnostics(
       }
     }
 
-    // Missing record terminator: only flag when we know the keyword takes
-    // records (size_kind of 'fixed' or 'list'). If size_kind is unknown we
-    // stay quiet rather than risk false positives. Variadic-record keywords
-    // (RSVD, RVVD, PVDO, …) are also exempt — their records span multiple
-    // lines, and only the line carrying '/' completes the record.
-    if (
-      !hasTerm &&
+    // Positional value-type check. Each token is validated against the
+    // matching item's declared type (and options set). Skipped for
+    // variadic-record keywords (table data with a single ALL-arity item, no
+    // meaningful per-position types) and for keywords lacking parameter data.
+    if (activeKw.parameters?.length && !activeKw.variadic_record) {
+      let col = 1;
+      for (const tok of tokens) {
+        const repeat = tok.text.match(/^(\d+)\*(.*)$/);
+        const pureDefault = tok.text === '*' || (repeat !== null && repeat[2] === '');
+        if (!pureDefault) {
+          // For a repeat-value token (N*VALUE) check the repeated VALUE
+          // against the parameter at the run's first position.
+          const valueText = repeat ? repeat[2] : tok.text;
+          const param = paramAtPosition(activeKw, currentRecord, col);
+          if (param) {
+            const msg = valueTypeError(param, valueText, activeKw.name);
+            if (msg) {
+              out.push({ line: i, startChar: tok.start, endChar: tok.end, message: msg });
+            }
+          }
+        }
+        col += tok.columnCount;
+      }
+    }
+
+    // Record terminator tracking. OPM Flow allows a record's '/' to appear on a
+    // later line, so we don't flag a missing terminator here — we mark the
+    // record "open" and let the standalone-'/' handler close it, or closeKw
+    // flag it if the block ends with the record still open. A trailing '/' on
+    // this line closes the record immediately.
+    if (hasTerm) {
+      openRecordLine = -1;
+    } else if (
       !activeKw.variadic_record &&
       (activeKw.size_kind === 'fixed' || activeKw.size_kind === 'list')
     ) {
-      out.push({
-        line: i,
-        startChar: lastTok.start,
-        endChar: lastTok.end,
-        message: `${activeKw.name}: record is missing the terminating '/'.`,
-        code: 'missing-record-terminator',
-      });
+      openRecordLine = i;
+      openRecordStart = lastTok.start;
+      openRecordEnd = lastTok.end;
     }
 
     // For array-kind keywords, a '/' trailing the last value line closes
@@ -534,5 +856,52 @@ export function computeDiagnostics(
   }
 
   closeKw();
+
+  // --- Cross-keyword constraints (requires / prohibits) -------------------
+  // Evaluated document-wide once all keyword occurrences are known.
+  const reportedProhibitPairs = new Set<string>();
+  let hasImplicitPhaseMode = false;
+  for (const k of IMPLICIT_PHASE_MODE_KEYWORDS) {
+    if (seenKeywords.has(k)) { hasImplicitPhaseMode = true; break; }
+  }
+  for (const [name, where] of seenKeywords) {
+    const { entry } = where;
+
+    // `requires`: every listed keyword must also be present. Suppressed when
+    // the deck pulls in other files (the requirement may be satisfied there)
+    // or when the input has no section header (an INCLUDE fragment, not a
+    // complete deck).
+    if (entry.requires && !hasIncludeKeyword && sawSectionHeader) {
+      for (const req of entry.requires) {
+        if (seenKeywords.has(req)) continue;
+        // A phase requirement is satisfied implicitly under CO2STORE/H2STORE
+        // and similar modes, which set the phases without the phase keyword.
+        if (hasImplicitPhaseMode && PHASE_KEYWORDS.has(req)) continue;
+        out.push({
+          line: where.line,
+          startChar: where.startChar,
+          endChar: where.endChar,
+          message: `${name} requires ${req}, which is not present in the deck.`,
+        });
+      }
+    }
+
+    // `prohibits`: warn once per unordered pair when both are present.
+    if (entry.prohibits) {
+      for (const pro of entry.prohibits) {
+        if (!seenKeywords.has(pro)) continue;
+        const pairKey = name < pro ? `${name} ${pro}` : `${pro} ${name}`;
+        if (reportedProhibitPairs.has(pairKey)) continue;
+        reportedProhibitPairs.add(pairKey);
+        out.push({
+          line: where.line,
+          startChar: where.startChar,
+          endChar: where.endChar,
+          message: `${name} cannot be used together with ${pro}; they are mutually exclusive.`,
+        });
+      }
+    }
+  }
+
   return out;
 }
