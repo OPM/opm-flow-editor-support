@@ -86,6 +86,17 @@ const index: Record<string, AnalysisEntry> = {
     sections: ['RUNSPEC', 'PROPS'],
     size_kind: 'fixed',
   },
+  // SUMMARY-section array vectors (probe-expanded), no optional_body flag.
+  WSIR: {
+    name: 'WSIR',
+    sections: ['SUMMARY'],
+    size_kind: 'array',
+  },
+  WSPR: {
+    name: 'WSPR',
+    sections: ['SUMMARY'],
+    size_kind: 'array',
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -1986,5 +1997,40 @@ describe('computeDiagnostics — fixed keyword without size_count', () => {
       '1 1 1 /',
     ];
     expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bare SUMMARY array vectors (WSIR/WSPR stacked, shared terminator)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — bare SUMMARY array vectors', () => {
+  it('does not require a terminator on bare, stacked SUMMARY vectors', () => {
+    const lines = [
+      'SUMMARY',
+      'WSIR',
+      'WSPR',
+      '/',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('accepts a lone bare SUMMARY vector with no body', () => {
+    const lines = [
+      'SUMMARY',
+      'WSIR',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('still flags a SUMMARY vector that lists wells but forgets the close', () => {
+    const lines = [
+      'SUMMARY',
+      'WSIR',
+      "'PROD1' 'PROD2'",
+    ];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].message).toMatch(/WSIR: missing terminating/);
   });
 });

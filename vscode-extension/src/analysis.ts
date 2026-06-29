@@ -555,7 +555,20 @@ export function computeDiagnostics(
     // and stacked, so a block that consumed no records doesn't need a
     // closing '/'. Once values are present the normal array/list rule
     // applies again.
-    const bareOptionalBody = activeKw.optional_body && recordCount === 0;
+    //
+    // Any `array`-kind SUMMARY vector is treated the same when it consumed no
+    // records: WSIR/WSPR/WMCTL and the C/W component-rate vectors are routinely
+    // written bare and stacked with a single shared '/'. opm-common's
+    // probe-expanded entries don't carry the `optional_body` flag, so key off
+    // the SUMMARY section list instead (which reliably separates them from real
+    // cell arrays like PRESSURE/PORO that legitimately require a terminator).
+    const isBareSummaryArray =
+      activeKw.size_kind === 'array' &&
+      recordCount === 0 &&
+      Array.isArray(activeKw.sections) &&
+      activeKw.sections.includes('SUMMARY');
+    const bareOptionalBody =
+      (activeKw.optional_body && recordCount === 0) || isBareSummaryArray;
     const needsTerminator =
       !bareOptionalBody
       // Variadic-record keywords (VFPPROD, VFPINJ, RSVD, …) have a table-style
