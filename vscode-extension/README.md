@@ -60,6 +60,16 @@ start typing an uppercase letter (e.g. `O` for `OPEN`) or press
 `Ctrl+Space` (`Cmd+Space` on macOS) to open the suggestions manually. Selecting
 an option inserts the value quoted, e.g. `'OPEN'`.
 
+When the current column is a **well- or group-name** parameter — recognised by
+the opm-common item name (the `WELL`/`GROUP` family and their spelling
+variants, so `WCONPROD`, `WELOPEN`, `GCONPROD`, `WEFAC`, … all qualify) — the
+list instead offers the names the deck already declares: well names from
+`WELSPECS`, and group names from `WELSPECS` (the parent-group column) and
+`GRUPTREE`. Names are gathered from the whole file, so opening a quote (`'`) or
+pressing `Ctrl+Space` in a well column lists every well defined in the deck.
+The `stringValueStyle` setting controls quoting just as it does for option
+values.
+
 ### UDQ and ACTIONX Support
 
 The user-defined-quantity sub-language (`UDQ` blocks) and `ACTIONX` action blocks

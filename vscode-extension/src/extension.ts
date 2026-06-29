@@ -34,6 +34,7 @@ import { findFileReferences } from './links';
 import { parsePathsAliases, resolvePathAlias, prtCandidatePaths } from './paths';
 import { DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
 import { buildKeywordSnippet } from './boilerplate';
+import { classifyNameParam, collectDeckNames } from './names';
 
 interface Parameter {
   index: number | string;
@@ -1308,7 +1309,7 @@ export function activate(context: vscode.ExtensionContext): void {
           }
           return false;
         });
-        if (!param?.options?.length) return [];
+        if (!param) return [];
 
         // If the cursor sits inside (or right after) a token that already
         // starts with a single quote, the inserted `'VALUE'` should replace
@@ -1330,35 +1331,68 @@ export function activate(context: vscode.ExtensionContext): void {
           .getConfiguration('opm-flow.completion', document.uri)
           .get<'both' | 'quoted' | 'unquoted'>('stringValueStyle', 'quoted');
 
+        // Helper shared by the enum and name paths: emit the bare and/or
+        // quoted forms of one value per the active style, replacing an
+        // already-open quoted token when present.
+        const buildForms = (
+          value: string,
+          filter: string,
+          kind: vscode.CompletionItemKind,
+          detailText: string,
+          doc?: vscode.MarkdownString,
+        ): vscode.CompletionItem[] => {
+          const make = (insert: string, formRank: string): vscode.CompletionItem => {
+            const item = new vscode.CompletionItem(insert, kind);
+            item.insertText = insert;
+            // Match against the bare value so typing `OP` finds `OPEN`/`'OPEN'`.
+            item.filterText = filter;
+            // Sort by value then form, so each value's bare/quoted pair groups.
+            item.sortText = `${filter}${formRank}`;
+            item.detail = detailText;
+            if (doc) item.documentation = doc;
+            if (replaceRange) item.range = replaceRange;
+            return item;
+          };
+          const quoted = make(`'${value}'`, '1');
+          if (quotedTok) return [quoted];
+          const bare = make(value, '0');
+          if (style === 'quoted') return [quoted];
+          if (style === 'unquoted') return [bare];
+          return [bare, quoted];
+        };
+
+        // Cross-keyword name completion: when this item is a well- or
+        // group-name slot (heuristic on the opm-common item name), offer the
+        // names the deck declares in WELSPECS / GRUPTREE.
+        const nameKind = classifyNameParam(param);
+        if (nameKind) {
+          const lines: string[] = [];
+          for (let i = 0; i < document.lineCount; i++) lines.push(document.lineAt(i).text);
+          const names = collectDeckNames(lines, t => Boolean(index[t]));
+          const pool = nameKind === 'well' ? names.wells : names.groups;
+          if (!pool.length) return [];
+          const label = nameKind === 'well' ? 'well name' : 'group name';
+          const detailN = `${kwName} parameter ${param.index}: ${label}`;
+          return pool.flatMap(name =>
+            buildForms(name, name, vscode.CompletionItemKind.Value, detailN),
+          );
+        }
+
+        if (!param.options?.length) return [];
+
         const detail = `${kwName} parameter ${param.index}: ${param.name}`;
         const documentation = param.description
           ? new vscode.MarkdownString(param.description)
           : undefined;
 
-        const makeItem = (insert: string, opt: string, formRank: string): vscode.CompletionItem => {
-          const item = new vscode.CompletionItem(insert, vscode.CompletionItemKind.EnumMember);
-          item.insertText = insert;
-          // Match against the bare option so typing `OP` finds both `OPEN` and `'OPEN'`.
-          item.filterText = opt;
-          // Sort by option then form, so each option's bare/quoted pair stays grouped.
-          item.sortText = `${opt}${formRank}`;
-          item.detail = detail;
-          if (documentation) item.documentation = documentation;
-          if (replaceRange) item.range = replaceRange;
-          return item;
-        };
-
-        return param.options.flatMap(opt => {
-          const quoted = makeItem(`'${opt}'`, opt, '1');
-          if (quotedTok) return [quoted];
-          const bare = makeItem(opt, opt, '0');
-          if (style === 'quoted') return [quoted];
-          if (style === 'unquoted') return [bare];
-          return [bare, quoted];
-        });
+        return param.options.flatMap(opt =>
+          buildForms(opt, opt, vscode.CompletionItemKind.EnumMember, detail, documentation),
+        );
       },
     },
-    ...('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''))
+    // Letters trigger as the user types a value; `'` triggers so opening a
+    // quote on a well/group-name slot surfaces the declared names immediately.
+    ...('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')), "'"
   );
 
   // --- Completion provider: UDQ control words and functions ---
