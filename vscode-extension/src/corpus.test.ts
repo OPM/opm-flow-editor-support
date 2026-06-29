@@ -22,6 +22,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { computeDiagnostics, AnalysisIndex, LineDiagnostic } from './analysis';
 import { DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
+import { applyKeywordSupplement } from './keyword-supplement';
 
 const DEFAULT_CORPUS = 'M:/gitroot/opm-tests';
 const CORPUS_DIR = process.env.OPM_TESTS_DIR ?? DEFAULT_CORPUS;
@@ -84,7 +85,8 @@ function walk(dir: string, out: string[]): void {
 
 function loadIndex(): AnalysisIndex {
   const p = path.join(__dirname, '..', 'data', 'keyword_index_compact.json');
-  return JSON.parse(fs.readFileSync(p, 'utf-8')) as AnalysisIndex;
+  const index = JSON.parse(fs.readFileSync(p, 'utf-8')) as AnalysisIndex;
+  return applyKeywordSupplement(index);
 }
 
 function loadSummaryPatterns(): RegExp[] {
