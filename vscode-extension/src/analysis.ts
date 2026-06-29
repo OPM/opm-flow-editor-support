@@ -82,6 +82,16 @@ export interface AnalysisEntry {
 
 export type AnalysisIndex = Record<string, AnalysisEntry>;
 
+/** Stable identifier for diagnostics that have an unambiguous quick fix.
+ *  Diagnostics without a fix leave this undefined. */
+export type DiagnosticCode =
+  | 'lowercase-keyword'
+  | 'indented-keyword'
+  | 'missing-record-terminator'
+  | 'missing-list-terminator'
+  | 'missing-array-terminator'
+  | 'unknown-keyword';
+
 export interface LineDiagnostic {
   /** Zero-based document line. */
   line: number;
@@ -90,6 +100,57 @@ export interface LineDiagnostic {
   endChar: number;
   /** Human-readable message ready for VS Code. */
   message: string;
+  /** Set when a one-click quick fix is available for this diagnostic. */
+  code?: DiagnosticCode;
+  /** For `unknown-keyword`: the nearest known keyword to offer as a
+   *  replacement, when one is close enough. */
+  suggestion?: string;
+}
+
+/** Levenshtein edit distance, capped early once it exceeds `max`. */
+function editDistance(a: string, b: string, max: number): number {
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > max) return max + 1;
+  let prev = Array.from({ length: lb + 1 }, (_, j) => j);
+  let curr = new Array<number>(lb + 1);
+  for (let i = 1; i <= la; i++) {
+    curr[0] = i;
+    let rowMin = curr[0];
+    for (let j = 1; j <= lb; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    if (rowMin > max) return max + 1;
+    [prev, curr] = [curr, prev];
+  }
+  return prev[lb];
+}
+
+/** The recognised keyword closest to `kw` (typo candidate), or undefined when
+ *  nothing is within a small edit distance. Searches the index plus the
+ *  section keywords. */
+function nearestKeyword(
+  kw: string,
+  index: AnalysisIndex,
+  sectionKeywords: ReadonlySet<string>,
+): string | undefined {
+  // Allow more slack for longer names; never more than 2 edits.
+  const max = kw.length >= 6 ? 2 : 1;
+  let best: string | undefined;
+  let bestDist = max + 1;
+  const consider = (cand: string) => {
+    if (cand === kw) return;
+    const d = editDistance(kw, cand, max);
+    if (d < bestDist) {
+      bestDist = d;
+      best = cand;
+    }
+  };
+  for (const cand of sectionKeywords) consider(cand);
+  for (const cand of Object.keys(index)) consider(cand);
+  return bestDist <= max ? best : undefined;
 }
 
 /** True when the line, after leading whitespace, is just '/' (optionally
@@ -244,6 +305,9 @@ export function computeDiagnostics(
         startChar: sc,
         endChar: ec,
         message: `${activeKw.name}: missing terminating '/' to ${what}.`,
+        code: activeKw.size_kind === 'array'
+          ? 'missing-array-terminator'
+          : 'missing-list-terminator',
       });
     }
     activeKw = null;
@@ -281,6 +345,7 @@ export function computeDiagnostics(
           startChar: section.indent,
           endChar: section.indent + section.name.length,
           message: `${section.name}: keywords must start in column 1; indented keywords are not recognised by OPM Flow.`,
+          code: 'indented-keyword',
         });
       }
       closeKw();
@@ -306,6 +371,7 @@ export function computeDiagnostics(
           startChar: indent,
           endChar: indent + tok.length,
           message: `${upper}: keywords must be in capital case; lowercase keywords are not recognised by OPM Flow.`,
+          code: 'lowercase-keyword',
         });
         closeKw();
         continue;
@@ -344,6 +410,7 @@ export function computeDiagnostics(
             startChar: indent,
             endChar: indent + kw.length,
             message: `${kw}: keywords must start in column 1; indented keywords are not recognised by OPM Flow.`,
+            code: 'indented-keyword',
           });
         }
 
@@ -368,6 +435,8 @@ export function computeDiagnostics(
             startChar: activeKwIndent,
             endChar: activeKwIndent + kw.length,
             message: `${kw} is not a recognised OPM Flow keyword.`,
+            code: 'unknown-keyword',
+            suggestion: nearestKeyword(kw, index, SECTION_KEYWORD_SET),
           });
           continue;
         }
@@ -444,6 +513,7 @@ export function computeDiagnostics(
         startChar: lastTok.start,
         endChar: lastTok.end,
         message: `${activeKw.name}: record is missing the terminating '/'.`,
+        code: 'missing-record-terminator',
       });
     }
 
