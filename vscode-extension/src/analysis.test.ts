@@ -1226,3 +1226,59 @@ describe('computeDiagnostics — TITLE accepts a bare title line', () => {
     expect(computeDiagnostics(lines, titleIndex)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Quick-fix discriminator codes
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — quick-fix codes', () => {
+  it('tags a lowercase keyword', () => {
+    const diags = computeDiagnostics(['SCHEDULE', 'welspecs', '/'], index);
+    expect(diags[0].code).toBe('lowercase-keyword');
+  });
+
+  it('tags an indented keyword', () => {
+    const diags = computeDiagnostics(['SCHEDULE', '\tWELSPECS', '/'], index);
+    expect(diags[0].code).toBe('indented-keyword');
+  });
+
+  it('tags an indented section keyword', () => {
+    const diags = computeDiagnostics(['  RUNSPEC'], index);
+    expect(diags[0].code).toBe('indented-keyword');
+  });
+
+  it('tags a record missing its terminating /', () => {
+    const diags = computeDiagnostics(['RUNSPEC', 'DIMENS', '10 10 10'], index);
+    const d = diags.find(x => x.code === 'missing-record-terminator');
+    expect(d).toBeDefined();
+  });
+
+  it('tags a list block missing its closing /', () => {
+    const diags = computeDiagnostics(
+      ['SCHEDULE', 'WELSPECS', "'W1' 'G' 1 1 /", 'INCLUDE'],
+      index,
+    );
+    const d = diags.find(x => x.code === 'missing-list-terminator');
+    expect(d).toBeDefined();
+  });
+
+  it('tags an array block missing its closing /', () => {
+    const diags = computeDiagnostics(['GRID', 'PORO', '0.1 0.2 0.3', 'NTG'], index);
+    const d = diags.find(x => x.code === 'missing-array-terminator');
+    expect(d).toBeDefined();
+  });
+
+  it('tags an unknown keyword and suggests the nearest match', () => {
+    const diags = computeDiagnostics(['RUNSPEC', 'DIMNES'], index);
+    const d = diags.find(x => x.code === 'unknown-keyword');
+    expect(d).toBeDefined();
+    expect(d!.suggestion).toBe('DIMENS');
+  });
+
+  it('leaves suggestion undefined for an unknown keyword with no close match', () => {
+    const diags = computeDiagnostics(['RUNSPEC', 'ZZZQQQ'], index);
+    const d = diags.find(x => x.code === 'unknown-keyword');
+    expect(d).toBeDefined();
+    expect(d!.suggestion).toBeUndefined();
+  });
+});
