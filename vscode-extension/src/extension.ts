@@ -22,7 +22,7 @@ import {
   toggleLineComments,
 } from './formatting';
 import { computeDiagnostics, DiagnosticCode, AnalysisIndex } from './analysis';
-import { applyKeywordSupplement } from './keyword-supplement';
+import { prepareKeywordIndex } from './keyword-supplement';
 import {
   UDQ_CONTROL_WORDS,
   UDQ_FUNCTIONS,
@@ -99,8 +99,8 @@ function loadKeywordIndex(context: vscode.ExtensionContext): KeywordIndex {
     const raw = fs.readFileSync(indexPath, 'utf-8');
     const index = JSON.parse(raw) as KeywordIndex;
     // Add curated keywords that OPM Flow accepts but that are absent from the
-    // manual / opm-common (and so from the generated index).
-    applyKeywordSupplement(index as unknown as AnalysisIndex);
+    // manual / opm-common, and normalise shapeless SUMMARY vectors.
+    prepareKeywordIndex(index as unknown as AnalysisIndex);
     return index;
   } catch (e) {
     console.error('OPM Flow: failed to load keyword index', e);

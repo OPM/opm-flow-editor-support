@@ -71,3 +71,39 @@ export function applyKeywordSupplement(index: AnalysisIndex): AnalysisIndex {
   }
   return index;
 }
+
+/**
+ * Give every SUMMARY-section vector that lacks an explicit `size_kind` the
+ * `array` shape. opm-common's probe expansion (and the L-modifier variants such
+ * as CGMIRL, CGMPRL) emit recognised entries with no record shape, so their
+ * optional, '/'-terminated name list — `CGMIRL` / `INJ1 /` / `/` — was parsed
+ * with the well name mistaken for a new keyword. Every SUMMARY vector takes
+ * that same optional name-list body, and the bare case (no names) is already
+ * exempt from the terminator check, so `array` is the correct uniform shape.
+ *
+ * Mutates and returns `index`.
+ */
+export function normalizeSummaryVectorShapes(index: AnalysisIndex): AnalysisIndex {
+  for (const name in index) {
+    const entry = index[name];
+    if (
+      !entry.size_kind &&
+      Array.isArray(entry.sections) &&
+      entry.sections.includes('SUMMARY')
+    ) {
+      entry.size_kind = 'array';
+    }
+  }
+  return index;
+}
+
+/**
+ * Standard index preparation shared by the extension and the corpus harness:
+ * add the curated supplement, then normalise SUMMARY-vector shapes. Mutates and
+ * returns `index`.
+ */
+export function prepareKeywordIndex(index: AnalysisIndex): AnalysisIndex {
+  applyKeywordSupplement(index);
+  normalizeSummaryVectorShapes(index);
+  return index;
+}

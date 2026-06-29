@@ -311,6 +311,27 @@ function isSummaryModifierVector(index: AnalysisIndex, kw: string): boolean {
   return false;
 }
 
+/**
+ * True when `kw` is a recognised SUMMARY vector by *shape* rather than by an
+ * explicit index entry: a user-defined quantity name (WUOPRL, FU_VAR1), a
+ * region-set-qualified vector (ROIP_ABC), a standard L-modifier vector, or a
+ * member of one of opm-common's open-ended summary-vector families. Such a
+ * token at column 1 starts its own vector and must never be absorbed as a
+ * name-list argument of a preceding SUMMARY vector.
+ */
+function isShapeRecognisedSummaryToken(
+  kw: string,
+  index: AnalysisIndex,
+  summaryNamePatterns: readonly RegExp[],
+): boolean {
+  return (
+    UDQ_NAME_RE.test(kw)
+    || isRegionSetVector(index, kw)
+    || isSummaryModifierVector(index, kw)
+    || summaryNamePatterns.some(re => re.test(kw))
+  );
+}
+
 /** Resolve `kw` to an index entry, falling back to a templated-prefix
  *  match when no exact entry exists. Returns the *template's* entry —
  *  callers use it for shape (size_kind, etc.); the displayed keyword
@@ -725,9 +746,24 @@ export function computeDiagnostics(
       // keyword. Section headers are matched earlier and still end the block.
       const inFreeformMnemonicBlock =
         activeKw !== null && FREEFORM_MNEMONIC_KEYWORDS.has(activeKw.name);
+      // A column-1 token that is itself a recognised SUMMARY vector (by shape)
+      // sitting under an open SUMMARY vector starts its own vector — it is not a
+      // name-list argument. Without this guard a bare enable-keyword (PERFORMA)
+      // would greedily swallow the UDQ/tracer mnemonics that follow it and then
+      // be flagged for a missing terminator.
+      const activeIsSummaryVector =
+        activeKw !== null
+        && Array.isArray(activeKw.sections)
+        && activeKw.sections.includes('SUMMARY');
+      const tokenStartsOwnSummaryVector =
+        indent === 0
+        && !entry
+        && activeIsSummaryVector
+        && isShapeRecognisedSummaryToken(kw, index, summaryNamePatterns);
       const treatAsRecord =
         activeKw !== null
         && !excludedKeywords.has(kw)
+        && !tokenStartsOwnSummaryVector
         && (
           inFreeformMnemonicBlock ||
           // An indented token that is not a known keyword cannot be a keyword
@@ -776,19 +812,11 @@ export function computeDiagnostics(
         // typo. Flag and stop tracking — there's no parser data to validate the
         // record body against anyway.
         if (!activeKw) {
-          // User-defined quantity names (WUOPRL, FU_VAR1, …) are recognised by
-          // shape: they are user-defined and so never appear in the index, but
-          // are valid as bare SUMMARY mnemonics and in ACTIONX/UDQ bodies.
-          if (UDQ_NAME_RE.test(kw)) continue;
-          // Region summary vectors qualified by a named FIP region set
-          // (ROIP_ABC, RPR__ABC) are likewise user-qualified and not indexed.
-          if (isRegionSetVector(index, kw)) continue;
-          // Standard L-modifier summary vectors (WOPRL completion-level,
-          // LWWIR LGR-local) built on an indexed SUMMARY base vector.
-          if (isSummaryModifierVector(index, kw)) continue;
-          // Open-ended summary-vector families from opm-common's
-          // deck_name_regex (UDQ, tracer, water-cut-bucket mnemonics).
-          if (summaryNamePatterns.some(re => re.test(kw))) continue;
+          // Recognised SUMMARY vectors by shape rather than index entry:
+          // user-defined quantity names (WUOPRL, FU_VAR1), region-set-qualified
+          // vectors (ROIP_ABC), standard L-modifier vectors (WOPRL, LWWIR), and
+          // members of opm-common's open-ended deck_name_regex families.
+          if (isShapeRecognisedSummaryToken(kw, index, summaryNamePatterns)) continue;
           out.push({
             line: i,
             startChar: activeKwIndent,
