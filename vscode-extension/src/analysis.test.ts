@@ -68,6 +68,16 @@ const index: Record<string, AnalysisEntry> = {
     sections: ['SCHEDULE'],
     size_kind: 'array',
   },
+  TITLE: {
+    name: 'TITLE',
+    sections: ['RUNSPEC'],
+    size_kind: 'none',
+  },
+  CO2STORE: {
+    name: 'CO2STORE',
+    sections: ['RUNSPEC'],
+    size_kind: 'none',
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -1901,6 +1911,44 @@ describe('computeDiagnostics — ACTIONX block', () => {
       'FMWPR >= 5 /',
       '/',
       'ENDACTIO',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Raw-text keyword bodies (TITLE)
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — raw-text keyword bodies', () => {
+  it('does not parse an indented TITLE text line as a keyword', () => {
+    const lines = [
+      'RUNSPEC',
+      'TITLE',
+      '   CO2STORE',
+      'DIMENS',
+      '20 1 20 /',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('does not flag a TITLE text token that collides with a keyword name', () => {
+    const lines = [
+      'RUNSPEC',
+      'TITLE',
+      'ACTIONX_GCONPROD',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('skips a blank line before consuming the TITLE text', () => {
+    const lines = [
+      'RUNSPEC',
+      'TITLE',
+      '',
+      'CO2STORE STUDY',
+      'DIMENS',
+      '1 1 1 /',
     ];
     expect(computeDiagnostics(lines, index)).toEqual([]);
   });

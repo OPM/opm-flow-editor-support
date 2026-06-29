@@ -240,6 +240,18 @@ const UDQ_NAME_RE = /^[ABCFGRSW]U[A-Z0-9_]+$/;
 const UDQ_CONTROL_WORDS = new Set(['ASSIGN', 'DEFINE', 'UNITS', 'UPDATE']);
 
 /**
+ * Keywords whose "record" is a single line of free-form text on the line after
+ * the keyword name, with no '/' terminator (mirrors the build script's
+ * ``RAW_TEXT_KEYWORDS``). The body text is arbitrary and frequently happens to
+ * be an upper-case token that collides with a real keyword name — e.g.
+ * ``TITLE`` followed by ``CO2STORE`` or ``ACTIONX_GCONPROD``. Without special
+ * handling that body line is mis-parsed as a keyword (flagged "indented" or
+ * "not recognised"), so the line immediately following one of these keywords is
+ * consumed verbatim and never analysed.
+ */
+const RAW_TEXT_BODY_KEYWORDS = new Set(['TITLE']);
+
+/**
  * Region summary vector qualified by a named FIP region set, e.g. ``ROIP_ABC``
  * (= base vector ``ROIP`` over region set ``ABC``) or ``RPR__ABC``. The base is
  * a region vector (``R``-prefixed) that exists in the index; the ``_<NAME>``
@@ -476,6 +488,10 @@ export function computeDiagnostics(
   let openRecordEnd = 0;
   let listTerminatorSeen = false;
   let arrayTerminatorSeen = false;
+  // Set once a RAW_TEXT_BODY_KEYWORD (TITLE, …) is recognised: the next
+  // non-blank, non-comment line is its free-form text body and must be skipped
+  // wholesale rather than parsed as a keyword.
+  let expectRawTextLine = false;
   let currentSection: string | null = null;
   // True once an INCLUDE/IMPORT/GDFILE has appeared since the last section
   // header. An included file may itself contain section headers (decks
@@ -580,6 +596,15 @@ export function computeDiagnostics(
     const text = lines[i];
     if (isCommentLine(text)) continue;
     if (text.trim() === '') continue;
+
+    // Free-form text body of a raw-text keyword (TITLE, …). Consumed verbatim
+    // so a title like `CO2STORE` or `ACTIONX_GCONPROD` is not mis-parsed as a
+    // keyword. Done before every other check (section, terminator, keyword) so
+    // even title text shaped like a section header is left alone.
+    if (expectRawTextLine) {
+      expectRawTextLine = false;
+      continue;
+    }
 
     // A line that is just '/' (with optional comment). When a record is open
     // (its values were on previous lines) this '/' terminates that record. When
@@ -743,6 +768,12 @@ export function computeDiagnostics(
           actionxEnd = activeKwIndent + kw.length;
         } else if (activeKw.name === 'ENDACTIO') {
           actionxOpenLine = -1;
+        }
+
+        // Raw-text keywords (TITLE, …) carry a single free-form text line that
+        // must not be parsed as a keyword. Arm the skip for the next line.
+        if (RAW_TEXT_BODY_KEYWORDS.has(activeKw.name)) {
+          expectRawTextLine = true;
         }
 
         // Record the first occurrence of this keyword for the document-wide
