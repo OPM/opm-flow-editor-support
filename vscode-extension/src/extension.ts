@@ -19,11 +19,12 @@ import {
   tokenColumnCount,
   toggleLineComments,
 } from './formatting';
-import { computeDiagnostics } from './analysis';
+import { computeDiagnostics, DiagnosticCode } from './analysis';
 import { buildOutline, OutlineNode } from './outline';
 import { findFileReferences } from './links';
 import { parsePathsAliases, resolvePathAlias, prtCandidatePaths } from './paths';
 import { DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
+import { buildKeywordSnippet } from './boilerplate';
 
 interface Parameter {
   index: number | string;
@@ -942,6 +943,80 @@ function getExcludedKeywords(resource?: vscode.Uri): ReadonlySet<string> {
   return new Set(raw.map(k => k.toUpperCase()));
 }
 
+/** A diagnostic carrying the extra fields the quick-fix provider reads back
+ *  off `context.diagnostics` (same object instances within the host). */
+type OpmDiagnostic = vscode.Diagnostic & { suggestion?: string };
+
+/** Build the quick-fix code actions for the OPM Flow diagnostics in range. */
+function provideOpmCodeActions(
+  document: vscode.TextDocument,
+  context: vscode.CodeActionContext,
+): vscode.CodeAction[] {
+  const actions: vscode.CodeAction[] = [];
+  for (const diag of context.diagnostics) {
+    if (diag.source !== 'OPM Flow') continue;
+    const code = diag.code as DiagnosticCode | undefined;
+    if (!code) continue;
+    const range = diag.range;
+
+    const makeFix = (title: string, edit: (e: vscode.WorkspaceEdit) => void, preferred = false) => {
+      const action = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);
+      action.edit = new vscode.WorkspaceEdit();
+      edit(action.edit);
+      action.diagnostics = [diag];
+      action.isPreferred = preferred;
+      actions.push(action);
+    };
+
+    switch (code) {
+      case 'lowercase-keyword': {
+        const token = document.getText(range);
+        makeFix(`Convert '${token}' to uppercase`, e => {
+          e.replace(document.uri, range, token.toUpperCase());
+        }, true);
+        break;
+      }
+      case 'indented-keyword': {
+        // Delete the leading whitespace so the keyword starts in column 1.
+        const lineStart = new vscode.Position(range.start.line, 0);
+        const dedent = new vscode.Range(lineStart, range.start);
+        makeFix('Move keyword to column 1', e => {
+          e.delete(document.uri, dedent);
+        }, true);
+        break;
+      }
+      case 'missing-record-terminator': {
+        // Append ' /' at the end of the record line.
+        const line = document.lineAt(range.start.line);
+        makeFix("Add terminating '/'", e => {
+          e.insert(document.uri, line.range.end, ' /');
+        }, true);
+        break;
+      }
+      case 'missing-list-terminator':
+      case 'missing-array-terminator': {
+        // Insert a standalone '/' line after the (last) record line.
+        const line = document.lineAt(range.start.line);
+        const what = code === 'missing-array-terminator' ? 'value array' : 'record list';
+        makeFix(`Add '/' to close the ${what}`, e => {
+          e.insert(document.uri, line.range.end, '\n/');
+        }, true);
+        break;
+      }
+      case 'unknown-keyword': {
+        const suggestion = (diag as OpmDiagnostic).suggestion;
+        if (suggestion) {
+          makeFix(`Replace with '${suggestion}'`, e => {
+            e.replace(document.uri, range, suggestion);
+          }, true);
+        }
+        break;
+      }
+    }
+  }
+  return actions;
+}
+
 function refreshDiagnostics(
   document: vscode.TextDocument,
   index: KeywordIndex,
@@ -953,8 +1028,12 @@ function refreshDiagnostics(
   const excluded = getExcludedKeywords(document.uri);
   const diags = computeDiagnostics(lines, index, excluded, summaryPatterns).map(d => {
     const range = new vscode.Range(d.line, d.startChar, d.line, d.endChar);
-    const out = new vscode.Diagnostic(range, d.message, vscode.DiagnosticSeverity.Warning);
+    const out: OpmDiagnostic = new vscode.Diagnostic(range, d.message, vscode.DiagnosticSeverity.Warning);
     out.source = 'OPM Flow';
+    // Carry the quick-fix discriminator (and any typo suggestion) through to
+    // the code-action provider, which reads them off the diagnostic object.
+    if (d.code) out.code = d.code;
+    if (d.suggestion) out.suggestion = d.suggestion;
     return out;
   });
   collection.set(document.uri, diags);
@@ -1107,16 +1186,36 @@ export function activate(context: vscode.ExtensionContext): void {
       ): vscode.CompletionItem[] {
         const linePrefix = document.lineAt(position).text.substring(0, position.character);
         if (!/^\s*[A-Z][A-Z0-9_-]*$/.test(linePrefix)) return [];
+        const completionConfig = vscode.workspace.getConfiguration('opm-flow.completion', document.uri);
+        const style = completionConfig.get<'both' | 'quoted' | 'unquoted'>('stringValueStyle', 'quoted');
+        const insertMode = completionConfig.get<'template' | 'keyword'>('keywordInsert', 'template');
         return keywords.map((kw) => {
           const entry = index[kw];
           const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword);
           item.detail = `[${entry.sections.join(', ')}] OPM Flow`;
           if (entry.summary) item.documentation = new vscode.MarkdownString(entry.summary);
+          // Insert a correctly-shaped sample record (typed placeholders /
+          // defaults) so the keyword arrives ready to edit, unless the user
+          // prefers just the bare keyword name.
+          if (insertMode === 'template') {
+            item.insertText = new vscode.SnippetString(buildKeywordSnippet(entry, style));
+          }
           return item;
         });
       },
     },
     ...('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''))
+  );
+
+  // --- Code-action provider: quick fixes for fixable diagnostics ---
+  const codeActionProvider = vscode.languages.registerCodeActionsProvider(
+    'opm-flow',
+    {
+      provideCodeActions(document, _range, context): vscode.CodeAction[] {
+        return provideOpmCodeActions(document, context);
+      },
+    },
+    { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }
   );
 
   // --- Completion provider: enum-style values inside record lines ---
@@ -1511,7 +1610,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  context.subscriptions.push(completionProvider, valueCompletionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, toggleCommentCommand, openPrtCommand, fileLinkProvider, foldingProvider);
+  context.subscriptions.push(completionProvider, valueCompletionProvider, codeActionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, toggleCommentCommand, openPrtCommand, fileLinkProvider, foldingProvider);
 }
 
 export function deactivate(): void {}

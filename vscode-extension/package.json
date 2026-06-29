@@ -224,6 +224,17 @@
           "default": true,
           "description": "Show the Default column in the keyword docs sidebar and hover tooltips."
         },
+        "opm-flow.completion.keywordInsert": {
+          "type": "string",
+          "enum": ["template", "keyword"],
+          "enumDescriptions": [
+            "Insert the keyword together with a sample data record — typed placeholders or defaults, terminated to match the keyword's shape — as a tab-navigable snippet.",
+            "Insert only the keyword name, with no data record."
+          ],
+          "default": "template",
+          "description": "What accepting a keyword completion inserts: the keyword plus a boilerplate data record (template), or just the keyword name.",
+          "scope": "resource"
+        },
         "opm-flow.completion.stringValueStyle": {
           "type": "string",
           "enum": ["both", "quoted", "unquoted"],

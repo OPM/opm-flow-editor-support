@@ -32,6 +32,17 @@ pane. Keywords that are valid in every section (e.g. `INCLUDE`, `ECHO`) list
 them all. Completions are triggered when typing uppercase letters at the start
 of a line.
 
+Accepting a completion inserts the keyword together with a **boilerplate data
+record** as a tab-navigable snippet: each parameter becomes a placeholder filled
+with its documented default, or a type-appropriate dummy value when there is no
+default (`1` for integers, `0.0` for reals, `'STRING'` for strings). The record
+is terminated to match the keyword's shape — a single `/` for fixed and array
+keywords, plus an extra standalone `/` line for record-list keywords like
+`WELSPECS` and `COMPDAT`. Activation keywords (e.g. `OIL`, `UNIFOUT`) insert the
+name alone. Press `Tab` to jump between placeholders and overwrite the dummy
+values. To insert just the keyword name with no record, set
+`opm-flow.completion.keywordInsert` to `keyword` (see [Settings](#settings)).
+
 ### Parameter Value Completion
 
 Inside a record, when the parameter at the current column has a known set of
@@ -95,6 +106,22 @@ Squiggles in the editor catch the most common deck-shape mistakes:
 Keywords whose record bodies don't fit the generic model can be silenced
 wholesale via the `opm-flow.diagnostics.excludedKeywords` setting — see
 [Settings](#settings) below.
+
+### Quick Fixes
+
+Diagnostics that have an unambiguous correction offer a lightbulb **Quick Fix**
+(`Ctrl+.`, or `Cmd+.` on macOS). Place the cursor on the squiggle, open the
+lightbulb, and apply:
+
+- **Convert to uppercase** — a lowercase keyword like `welspecs` → `WELSPECS`.
+- **Move keyword to column 1** — strip the leading whitespace from an indented
+  keyword.
+- **Add terminating `/`** — append the missing per-record `/`.
+- **Add `/` to close the record list / value array** — insert the missing
+  standalone `/` line that closes a `WELSPECS`/`COMPDAT` block or a
+  `PORO`/`PERMX` array.
+- **Replace with `<nearest>`** — for an unrecognised keyword that is a close typo
+  of a known one (e.g. `EQLDIM` → `EQLDIMS`), substitute the suggested keyword.
 
 ### Docs Panel (Sidebar)
 
@@ -256,6 +283,7 @@ you can override them per-workspace or per-folder.
 
 | Setting | Default | Description |
 | --- | --- | --- |
+| `opm-flow.completion.keywordInsert` | `"template"` | What accepting a keyword completion inserts. `"template"` adds the keyword plus a boilerplate data record (typed placeholders / documented defaults) as a tab-navigable snippet; `"keyword"` inserts just the keyword name. |
 | `opm-flow.completion.stringValueStyle` | `"quoted"` | How STRING-typed parameter values appear in the suggestion list. `"quoted"` shows only `'OPEN'`; `"unquoted"` shows only `OPEN`; `"both"` shows each option twice (e.g. `OPEN` and `'OPEN'`). Inside an existing quoted token only the quoted form is offered regardless of this setting. |
 
 ### Docs layout
@@ -307,6 +335,18 @@ The language is registered as `opm-flow`.
 - Python 3.10+ with `lxml` (only required when regenerating the keyword index)
 
 ## Release Notes
+
+### Unreleased
+
+- **Boilerplate keyword completion** — accepting a keyword completion now inserts
+  a sample data record as a tab-navigable snippet (documented defaults or
+  type-appropriate dummy values, terminated to match the keyword's shape) instead
+  of just the keyword name. The new `opm-flow.completion.keywordInsert` setting
+  switches back to name-only insertion.
+- **Diagnostic quick fixes** — lightbulb fixes for common deck mistakes:
+  uppercase a lowercase keyword, move an indented keyword to column 1, add a
+  missing record / list / array terminator `/`, and replace an unrecognised
+  keyword with its nearest known match.
 
 ### 0.8.0
 
