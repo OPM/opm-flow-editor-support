@@ -13,6 +13,8 @@ import {
   SECTION_KEYWORDS,
   matchSectionLine,
   formatRecordGroup,
+  parseUdqExpressionLine,
+  formatUdqBlock,
   parseHeadingPositions,
   formatRecordGroupWithHeading,
   buildHeadingAndAlignedRecords,
@@ -20,6 +22,12 @@ import {
   toggleLineComments,
 } from './formatting';
 import { computeDiagnostics, DiagnosticCode } from './analysis';
+import {
+  UDQ_CONTROL_WORDS,
+  UDQ_FUNCTIONS,
+  isUdqControlWord,
+  isUdqFunction,
+} from './udq';
 import { buildOutline, OutlineNode } from './outline';
 import { findFileReferences } from './links';
 import { parsePathsAliases, resolvePathAlias, prtCandidatePaths } from './paths';
@@ -736,6 +744,41 @@ function computeAlignEdits(document: vscode.TextDocument, range?: vscode.Range):
   const last = range ? range.end.line : document.lineCount - 1;
   let i = first;
   while (i <= last) {
+    // UDQ expression block (DEFINE/ASSIGN/UNITS/UPDATE name expr…). These are
+    // parsed specially (a '/' in the expression is division, not the
+    // terminator) and aligned with a dedicated formatter. Interspersed comment
+    // and blank lines are kept verbatim and do not split the table. Checked
+    // before parseRecordLine, which would mis-tokenize a division '/'.
+    if (parseUdqExpressionLine(document.lineAt(i).text)) {
+      const blockLineNums: number[] = [];
+      const blockLines: string[] = [];
+      // Index (within the block) of the last actual UDQ statement, so trailing
+      // comment/blank lines after the table are not swallowed into it.
+      let lastUdqPos = -1;
+      let k = i;
+      while (k <= last) {
+        const lineText = document.lineAt(k).text;
+        if (parseUdqExpressionLine(lineText)) {
+          lastUdqPos = blockLines.length;
+        } else if (!isCommentLine(lineText) && lineText.trim() !== '') {
+          break;
+        }
+        blockLineNums.push(k);
+        blockLines.push(lineText);
+        k++;
+      }
+      // Drop trailing comment/blank lines that follow the final statement.
+      const tableLen = lastUdqPos + 1;
+      const formatted = formatUdqBlock(blockLines.slice(0, tableLen));
+      for (let j = 0; j < tableLen; j++) {
+        if (formatted[j] !== blockLines[j]) {
+          edits.push(vscode.TextEdit.replace(document.lineAt(blockLineNums[j]).range, formatted[j]));
+        }
+      }
+      i = blockLineNums[tableLen - 1] + 1;
+      continue;
+    }
+
     const rec = parseRecordLine(document.lineAt(i).text);
     if (!rec) { i++; continue; }
     const nCols = rec.tokens.length;
@@ -1313,6 +1356,49 @@ export function activate(context: vscode.ExtensionContext): void {
     ...('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''))
   );
 
+  // --- Completion provider: UDQ control words and functions ---
+  const udqCompletionProvider = vscode.languages.registerCompletionItemProvider(
+    'opm-flow',
+    {
+      provideCompletionItems(
+        document: vscode.TextDocument,
+        position: vscode.Position
+      ): vscode.CompletionItem[] {
+        const activeKw = findActiveKeyword(document, position);
+        if (activeKw !== 'UDQ' && activeKw !== 'ACTIONX') return [];
+        const prefix = document.lineAt(position).text.substring(0, position.character);
+        if (/^\s*--/.test(prefix)) return [];
+
+        const items: vscode.CompletionItem[] = [];
+        // At the first token of a UDQ statement, suggest the control words.
+        const atStatementStart = activeKw === 'UDQ' && /^\s*[A-Z]*$/.test(prefix);
+        if (atStatementStart) {
+          for (const [w, desc] of Object.entries(UDQ_CONTROL_WORDS)) {
+            const item = new vscode.CompletionItem(w, vscode.CompletionItemKind.Keyword);
+            item.detail = 'UDQ control word';
+            item.documentation = new vscode.MarkdownString(desc);
+            item.sortText = `0${w}`;
+            items.push(item);
+          }
+        }
+        // Inside an expression (UDQ formula or ACTIONX condition), suggest the
+        // UDQ functions, inserted with parentheses ready for the argument.
+        if (!atStatementStart) {
+          for (const [name, fn] of Object.entries(UDQ_FUNCTIONS)) {
+            const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Function);
+            item.detail = fn.signature;
+            item.documentation = new vscode.MarkdownString(fn.description);
+            item.insertText = new vscode.SnippetString(`${name}($0)`);
+            item.sortText = `1${name}`;
+            items.push(item);
+          }
+        }
+        return items;
+      },
+    },
+    ...('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''))
+  );
+
   // --- Hover provider (tooltip) ---
   const hoverProvider = vscode.languages.registerHoverProvider('opm-flow', {
     provideHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | undefined {
@@ -1344,6 +1430,23 @@ export function activate(context: vscode.ExtensionContext): void {
           + `(\`opm-flow.diagnostics.excludedKeywords\`); arity, terminator, and section checks are skipped for this keyword.</span>`,
         );
         return new vscode.Hover(md);
+      }
+
+      // UDQ sub-language hovers: control words inside a UDQ block, and UDQ
+      // functions inside UDQ or ACTIONX expressions.
+      if (word) {
+        const activeKw = findActiveKeyword(document, position);
+        if (word in UDQ_CONTROL_WORDS && activeKw === 'UDQ') {
+          const md = new vscode.MarkdownString();
+          md.appendMarkdown(`### \`${word}\` — UDQ control word\n\n${UDQ_CONTROL_WORDS[word]}`);
+          return new vscode.Hover(md, wordRange);
+        }
+        if (isUdqFunction(word) && (activeKw === 'UDQ' || activeKw === 'ACTIONX')) {
+          const fn = UDQ_FUNCTIONS[word];
+          const md = new vscode.MarkdownString();
+          md.appendMarkdown(`### \`${fn.signature}\` — UDQ function\n\n${fn.description}`);
+          return new vscode.Hover(md, wordRange);
+        }
       }
 
       const col = columnAtCursor(line, position.character);
@@ -1620,7 +1723,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  context.subscriptions.push(completionProvider, valueCompletionProvider, codeActionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, toggleCommentCommand, openPrtCommand, fileLinkProvider, foldingProvider);
+  context.subscriptions.push(completionProvider, valueCompletionProvider, udqCompletionProvider, codeActionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, toggleCommentCommand, openPrtCommand, fileLinkProvider, foldingProvider);
 }
 
 export function deactivate(): void {}

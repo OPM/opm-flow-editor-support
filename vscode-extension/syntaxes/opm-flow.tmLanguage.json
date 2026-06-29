@@ -6,9 +6,13 @@
     { "include": "#comments" },
     { "include": "#sections" },
     { "include": "#end-keyword" },
+    { "include": "#actionx-control" },
+    { "include": "#udq-control" },
     { "include": "#keywords" },
     { "include": "#strings" },
     { "include": "#variables" },
+    { "include": "#udq-functions" },
+    { "include": "#operators" },
     { "include": "#defaults" },
     { "include": "#numbers" },
     { "include": "#terminators" },
@@ -27,6 +31,14 @@
       "name": "keyword.control.end.opm-flow",
       "match": "^\\s*END\\s*$"
     },
+    "actionx-control": {
+      "name": "keyword.control.actionx.opm-flow",
+      "match": "^\\s*(ACTIONX|ENDACTIO)(?=\\s|$)"
+    },
+    "udq-control": {
+      "name": "keyword.other.udq-control.opm-flow",
+      "match": "^\\s*(ASSIGN|DEFINE|UNITS|UPDATE)(?=\\s)"
+    },
     "keywords": {
       "name": "keyword.control.opm-flow",
       "match": "^[A-Z][A-Z0-9_+-]*(?=\\s*(?:--|/|$))"
@@ -42,6 +54,22 @@
     "variables": {
       "name": "variable.other.template.opm-flow",
       "match": "<[A-Z][A-Z0-9_]*>"
+    },
+    "udq-functions": {
+      "name": "support.function.udq.opm-flow",
+      "match": "\\b(ABS|DEF|EXP|IDV|LN|LOG|NINT|RANDN|RANDNORM|RANDU|SORTA|SORTD|UNDEF|SUM|AVEA|AVEG|AVEH|MIN|MAX|PROD|NORM1|NORM2|NORMI|ELDLR|ELDLM)(?=\\s*\\()"
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.opm-flow",
+          "match": "(?<=\\s)(>=|<=|==|!=|>|<|=)(?=\\s)"
+        },
+        {
+          "name": "keyword.operator.logical.opm-flow",
+          "match": "\\b(AND|OR)\\b"
+        }
+      ]
     },
     "defaults": {
       "name": "constant.language.default.opm-flow",

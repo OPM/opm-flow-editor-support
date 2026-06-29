@@ -22,6 +22,10 @@ Provides syntax highlighting for OPM Flow simulation deck files with support for
 - **Strings**: Text in single quotes
 - **Template variables**: `<NAME>` placeholders used in macro/ERT workflows
 - **END keyword**: Specially highlighted file terminator
+- **UDQ / ACTIONX constructs**: UDQ control words (`DEFINE`, `ASSIGN`, `UNITS`,
+  `UPDATE`), UDQ functions (`SORTA`, `SUM`, `ABS`, …), the comparison and
+  logical operators used in expressions (`>=`, `<=`, `==`, `AND`, `OR`), and the
+  `ACTIONX` / `ENDACTIO` action-block delimiters
 
 ### Keyword Autocompletion
 
@@ -55,6 +59,21 @@ To activate the list, position the cursor in the parameter column and either
 start typing an uppercase letter (e.g. `O` for `OPEN`) or press
 `Ctrl+Space` (`Cmd+Space` on macOS) to open the suggestions manually. Selecting
 an option inserts the value quoted, e.g. `'OPEN'`.
+
+### UDQ and ACTIONX Support
+
+The user-defined-quantity sub-language (`UDQ` blocks) and `ACTIONX` action blocks
+are recognised so the editor can assist with their distinct syntax:
+
+- **Completion** — inside a `UDQ` block, the start of a statement offers the
+  control words (`ASSIGN`, `DEFINE`, `UNITS`, `UPDATE`); inside a UDQ formula or
+  an `ACTIONX` condition, the UDQ functions (`SORTA`, `SUM`, `ABS`, …) are
+  offered and inserted with parentheses ready for the argument.
+- **Hover** — hovering a UDQ control word shows what it does, and hovering a UDQ
+  function shows its signature and description.
+- **Diagnostics** — a `UDQ` statement that doesn't start with a control word, and
+  an `ACTIONX` block left unclosed by `ENDACTIO`, are flagged (see
+  [Diagnostics](#diagnostics)).
 
 ### Hover Tooltips
 
@@ -119,6 +138,11 @@ Squiggles in the editor catch the most common deck-shape mistakes:
   header (an include fragment, not a complete deck).
 - **Mutually exclusive keywords** — two keywords that `opm-common` marks as
   `prohibits` partners both appearing in the same deck.
+- **UDQ statement without a control word** — a statement inside a `UDQ` block
+  that does not begin with `ASSIGN`, `DEFINE`, `UNITS`, or `UPDATE`.
+  Continuation lines of a statement whose `/` is deferred are not flagged.
+- **Unclosed `ACTIONX` block** — an `ACTIONX` action block with no matching
+  `ENDACTIO` before the end of the deck.
 
 Keywords whose record bodies don't fit the generic model can be silenced
 wholesale via the `opm-flow.diagnostics.excludedKeywords` setting — see
@@ -355,6 +379,15 @@ The language is registered as `opm-flow`.
 
 ### Unreleased
 
+- **UDQ and ACTIONX support** — the `UDQ` expression sub-language and `ACTIONX`
+  action blocks are now recognised. Syntax highlighting scopes UDQ control
+  words, UDQ functions, and expression operators, plus the `ACTIONX` /
+  `ENDACTIO` block delimiters. Hover and completion cover UDQ control words and
+  functions, and two new diagnostics flag a UDQ statement that doesn't start
+  with a control word and an `ACTIONX` block left unclosed by `ENDACTIO`.
+  Column alignment also gives `UDQ` expression blocks a dedicated three-column
+  layout (control word, variable, expression) that treats a `/` used for
+  division as part of the expression rather than the record terminator.
 - **Boilerplate keyword completion** — accepting a keyword completion now inserts
   a sample data record as a tab-navigable snippet (documented defaults or
   type-appropriate dummy values, terminated to match the keyword's shape) instead

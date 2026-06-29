@@ -43,6 +43,31 @@ const index: Record<string, AnalysisEntry> = {
   BARE: {
     name: 'BARE',
   },
+  UDQ: {
+    name: 'UDQ',
+    sections: ['SCHEDULE'],
+    size_kind: 'list',
+  },
+  ACTIONX: {
+    name: 'ACTIONX',
+    sections: ['SCHEDULE'],
+    size_kind: 'list',
+  },
+  ENDACTIO: {
+    name: 'ENDACTIO',
+    sections: ['SCHEDULE'],
+    size_kind: 'none',
+  },
+  WELOPEN: {
+    name: 'WELOPEN',
+    sections: ['SCHEDULE'],
+    size_kind: 'list',
+  },
+  TSTEP: {
+    name: 'TSTEP',
+    sections: ['SCHEDULE'],
+    size_kind: 'array',
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -1774,5 +1799,109 @@ describe('computeDiagnostics — quick-fix codes', () => {
     const d = diags.find(x => x.code === 'unknown-keyword');
     expect(d).toBeDefined();
     expect(d!.suggestion).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UDQ control-word validation
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — UDQ control words', () => {
+  it('accepts a UDQ block whose statements use control words', () => {
+    const lines = [
+      'SCHEDULE',
+      'UDQ',
+      "DEFINE WUPR1 1/(WWCT 'OP*') /",
+      'DEFINE WUPR3 SORTA(WUPR1) /',
+      'ASSIGN WU2 3.0 /',
+      'UNITS WUPR1 BARSA /',
+      '/',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('flags a UDQ statement that does not start with a control word', () => {
+    const lines = [
+      'SCHEDULE',
+      'UDQ',
+      'DEFIN WUPR1 1 /',
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].line).toBe(2);
+    expect(diags[0].message).toMatch(/expected a control word/);
+    expect(diags[0].message).toContain('DEFIN');
+  });
+
+  it('does not flag a continuation line of an open UDQ statement', () => {
+    // The '/' is deferred to the next line, so the second line continues the
+    // statement and must not be checked for a leading control word.
+    const lines = [
+      'SCHEDULE',
+      'UDQ',
+      'DEFINE WUPR1',
+      "  1/(WWCT 'OP*') /",
+      '/',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ACTIONX ... ENDACTIO block
+// ---------------------------------------------------------------------------
+
+describe('computeDiagnostics — ACTIONX block', () => {
+  it('accepts a complete ACTIONX ... ENDACTIO block', () => {
+    const lines = [
+      'SCHEDULE',
+      'ACTIONX',
+      'ACT01 10 /',
+      'FMWPR >= 4 AND /',
+      "WUPR3 'OP*' = 1 /",
+      '/',
+      'WELOPEN',
+      " '?' SHUT 0 0 0 2* /",
+      '/',
+      'ENDACTIO',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
+  });
+
+  it('flags an ACTIONX block that is never closed by ENDACTIO', () => {
+    const lines = [
+      'SCHEDULE',
+      'ACTIONX',
+      'ACT01 10 /',
+      'FMWPR >= 4 /',
+      '/',
+      'WELOPEN',
+      " '?' SHUT 0 0 0 2* /",
+      '/',
+    ];
+    const diags = computeDiagnostics(lines, index);
+    expect(diags).toHaveLength(1);
+    expect(diags[0].line).toBe(1);
+    expect(diags[0].message).toMatch(/ENDACTIO/);
+  });
+
+  it('does not flag when a later ACTIONX block is properly closed', () => {
+    const lines = [
+      'SCHEDULE',
+      'ACTIONX',
+      'ACT01 10 /',
+      'FMWPR >= 4 /',
+      '/',
+      'ENDACTIO',
+      'TSTEP',
+      ' 10 10 /',
+      'ACTIONX',
+      'ACT02 10 /',
+      'FMWPR >= 5 /',
+      '/',
+      'ENDACTIO',
+    ];
+    expect(computeDiagnostics(lines, index)).toEqual([]);
   });
 });

@@ -346,6 +346,157 @@ export function formatRecordGroup(records: RecordLine[]): string[] {
   });
 }
 
+// ---------------------------------------------------------------------------
+// UDQ expression group formatting
+// ---------------------------------------------------------------------------
+
+/** UDQ body control words that introduce a UDQ expression statement. */
+const UDQ_CONTROL_WORDS = new Set(['DEFINE', 'ASSIGN', 'UNITS', 'UPDATE']);
+
+/** A parsed UDQ statement of the form `control name expression /`. */
+export interface UdqRecord {
+  indent: string;
+  control: string;
+  name: string;
+  /** Expression tokens, single-space joined; '' when there is none. */
+  expr: string;
+  hasTerminator: boolean;
+  trailComment: string;
+}
+
+/** Split on whitespace while keeping quoted spans (and any glued punctuation,
+ *  e.g. a trailing ')') intact, so the tokens re-join to the original text. */
+function splitUdqTokens(s: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < s.length) {
+    while (i < s.length && (s[i] === ' ' || s[i] === '\t')) i++;
+    if (i >= s.length) break;
+    const start = i;
+    let inQuote = false;
+    while (i < s.length) {
+      const c = s[i];
+      if (c === "'") inQuote = !inQuote;
+      else if (!inQuote && (c === ' ' || c === '\t')) break;
+      i++;
+    }
+    out.push(s.substring(start, i));
+  }
+  return out;
+}
+
+/**
+ * Parse a single UDQ statement line `control name expression /`. Returns null
+ * when the line is not a UDQ statement (first token is not a control word, or
+ * there is no name). Unlike `parseRecordLine`, a '/' inside the expression
+ * (division, e.g. `1/(WWCT 'OP*')` or `(WGPR '*')/2000.0`) is NOT treated as
+ * the terminator — only a space-delimited trailing '/' terminates the record.
+ */
+export function parseUdqExpressionLine(line: string): UdqRecord | null {
+  const indent = line.match(/^[ \t]*/)![0];
+  let rest = line.slice(indent.length);
+
+  // Strip a trailing '--' comment (outside quotes).
+  let trailComment = '';
+  {
+    let inQuote = false;
+    for (let k = 0; k < rest.length - 1; k++) {
+      const c = rest[k];
+      if (c === "'") inQuote = !inQuote;
+      else if (!inQuote && c === '-' && rest[k + 1] === '-') {
+        trailComment = rest.slice(k).trimEnd();
+        rest = rest.slice(0, k);
+        break;
+      }
+    }
+  }
+
+  // The terminator is the last space-delimited (or line-start) '/' outside
+  // quotes. Division operators are glued to a neighbour and so do not qualify.
+  let termIdx = -1;
+  {
+    let inQuote = false;
+    for (let k = 0; k < rest.length; k++) {
+      const c = rest[k];
+      if (c === "'") { inQuote = !inQuote; continue; }
+      if (c === '/' && !inQuote) {
+        const prev = k > 0 ? rest[k - 1] : ' ';
+        if (prev === ' ' || prev === '\t') termIdx = k;
+      }
+    }
+  }
+
+  let hasTerminator = false;
+  let body = rest;
+  if (termIdx >= 0) {
+    hasTerminator = true;
+    const after = rest.slice(termIdx + 1).trim();
+    if (after && !trailComment) trailComment = after;
+    body = rest.slice(0, termIdx);
+  }
+
+  const tokens = splitUdqTokens(body);
+  if (tokens.length < 2) return null;
+  if (!UDQ_CONTROL_WORDS.has(tokens[0].toUpperCase())) return null;
+
+  return {
+    indent,
+    control: tokens[0],
+    name: tokens[1],
+    expr: tokens.slice(2).join(' '),
+    hasTerminator,
+    trailComment,
+  };
+}
+
+/**
+ * Align a group of UDQ statements (`DEFINE`/`ASSIGN`/`UNITS`/`UPDATE` name
+ * expression…). Three columns: the control word and the variable name both
+ * left-aligned, and the expression right-aligned so every statement's
+ * terminating '/' lines up. Expression tokens are single-space separated.
+ */
+export function formatUdqExpressionGroup(records: UdqRecord[]): string[] {
+  const ctrlWidth = Math.max(...records.map(r => r.control.length));
+  const nameWidth = Math.max(...records.map(r => r.name.length));
+  const maxExprLen = Math.max(0, ...records.map(r => r.expr.length));
+  const groupIndent = records[0].indent;
+  // Width of the fixed left part: control word + separator + name column.
+  const prefixLen = ctrlWidth + 1 + nameWidth;
+  // Column at which the right-aligned expression ends (and the '/' follows).
+  // The longest expression sits one space past the name column; shorter ones
+  // are pushed right to share that terminator column.
+  const exprEnd = maxExprLen > 0 ? prefixLen + 1 + maxExprLen : prefixLen;
+  return records.map(r => {
+    let body = groupIndent + r.control.padEnd(ctrlWidth) + ' ' + r.name.padEnd(nameWidth);
+    if (r.expr) {
+      const pad = Math.max(1, exprEnd - prefixLen - r.expr.length);
+      body += ' '.repeat(pad) + r.expr;
+    } else {
+      body = body.trimEnd();
+    }
+    if (r.hasTerminator) body += ' /';
+    return r.trailComment ? `${body} ${r.trailComment}` : body;
+  });
+}
+
+/**
+ * Align a contiguous UDQ block that may contain interspersed comment lines.
+ * Comment lines are returned verbatim and do not participate in the column
+ * computation; every UDQ statement in the block is aligned together (the
+ * comment does not split the table), so all columns stay consistent across it.
+ * Returns one output line per input line (same length). When the block holds
+ * fewer than two UDQ statements there is nothing to align and the input is
+ * returned unchanged.
+ */
+export function formatUdqBlock(lines: string[]): string[] {
+  const parsed = lines.map(parseUdqExpressionLine);
+  const records = parsed.filter((r): r is UdqRecord => r !== null);
+  if (records.length < 2) return lines.slice();
+  const formatted = formatUdqExpressionGroup(records);
+  let idx = 0;
+  return lines.map((line, i) => (parsed[i] !== null ? formatted[idx++] : line));
+}
+
 // Parse absolute char positions of each word in a heading comment line (-- word1 word2 ...)
 export function parseHeadingPositions(line: string): number[] | null {
   const m = line.match(/^(\s*--\s*)(.*)/);
