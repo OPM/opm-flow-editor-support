@@ -93,6 +93,12 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
 - **File navigation** — `Ctrl+click` a quoted path on `INCLUDE`, `IMPORT`,
   `RESTART`, or `GDFILE` statements to open the referenced file. `PATHS`
   aliases (`$NAME` lookups) are expanded before the file is resolved.
+- **Verify and run the simulation** (optional) — with a local OPM Flow binary
+  configured, **Verify Deck (dry run)** parses and initialises the deck without
+  solving (a fast check that it and its `INCLUDE`/`PATHS` files load cleanly),
+  and **Run Simulation** runs the full case, both in an integrated terminal. On
+  Windows the simulator runs through WSL, with deck paths translated to their
+  `/mnt/<drive>` mount automatically.
 - **Generate Keyword Reference** — opens a Markdown document listing all
   keywords grouped by section, useful for uploading as AI-chat context.
 

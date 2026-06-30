@@ -306,6 +306,28 @@ after a run. It is available from the editor right-click menu, the Command
 Palette, or the `Ctrl+Alt+P` (`Cmd+Alt+P` on macOS) shortcut. If the deck has
 not been run yet and no `.PRT` exists beside it, a notice is shown.
 
+### Verify and Run the Simulation (optional)
+
+When a local OPM Flow binary is configured, two commands let you act on the open
+deck without leaving the editor — both available from the editor right-click menu
+and the Command Palette:
+
+- **OPM Flow: Verify Deck (dry run)** runs flow in dry-run mode. The deck is
+  fully parsed and the model is initialized (grid, properties, wells, schedule),
+  but the time steps are not simulated — a fast check that the deck and
+  everything it pulls in via `INCLUDE` / `PATHS` loads cleanly.
+- **OPM Flow: Run Simulation** runs the full simulation.
+
+Both run in an integrated terminal, started in the deck's own directory so its
+relative paths resolve. The output appears live, and afterwards
+[Open PRT File](#open-prt-file) shows the print file.
+
+This is opt-in: nothing runs until you set `opm-flow.simulator.executablePath`
+(see [Simulator](#simulator) under Settings). On **Windows**, OPM Flow is
+typically installed inside WSL — enable `opm-flow.simulator.useWsl` and point the
+executable path at the Linux binary (e.g. `/usr/bin/flow`); the deck's Windows
+path is translated to its `/mnt/<drive>` mount automatically.
+
 ### Generate Keyword Reference
 
 **OPM Flow: Generate Keyword Reference** (Command Palette `Ctrl+Shift+P`) opens a
@@ -329,6 +351,19 @@ you can override them per-workspace or per-folder.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `opm-flow.additionalFileExtensions` | `[]` | Extra file extensions (with or without a leading `.`) to open as OPM Flow on top of the built-in list. Useful for project-specific include-file conventions. Matched case-insensitively. Example: `[".myinc", "wellconv"]`. For one-off cases the VS Code-native `files.associations` setting still works too. |
+
+### Simulator
+
+Optional integration for the [Verify and Run](#verify-and-run-the-simulation-optional)
+commands. Leave `executablePath` unset to keep the feature dormant.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `opm-flow.simulator.executablePath` | `"flow"` | Path to the OPM Flow executable. With `useWsl` enabled this is a path *inside* WSL (e.g. `/usr/bin/flow`); otherwise a native path or a name on `PATH`. |
+| `opm-flow.simulator.useWsl` | `false` | Run flow through WSL (`wsl.exe`). Required on Windows. The deck's Windows path is translated to its `/mnt/<drive>` mount automatically. |
+| `opm-flow.simulator.wslDistribution` | `""` | WSL distribution to use (e.g. `ubuntu-26.04`); empty uses the default. List installed distributions with `wsl -l -v`. Only used when `useWsl` is enabled. |
+| `opm-flow.simulator.verifyArgs` | `["--enable-dry-run=true"]` | Arguments for **Verify Deck**. The default parses and initializes the model without simulating time steps. Add `--parsing-strictness=high` to also fail on unsupported keywords. |
+| `opm-flow.simulator.runArgs` | `[]` | Extra arguments for **Run Simulation** (e.g. `--output-dir=...`, `--threads-per-process=4`). The deck file is supplied automatically. |
 
 ### Completion
 
@@ -389,6 +424,13 @@ The language is registered as `opm-flow`.
 
 ### Unreleased
 
+- **Verify and run the simulation (optional)** — new **OPM Flow: Verify Deck
+  (dry run)** and **OPM Flow: Run Simulation** commands launch a locally
+  installed `flow` binary on the open deck in an integrated terminal. Verify uses
+  flow's dry-run mode to confirm the deck (and its `INCLUDE` / `PATHS` files)
+  loads without solving. Configure via the new `opm-flow.simulator.*` settings;
+  Windows users can target a WSL distribution, with deck paths translated to
+  `/mnt/<drive>` automatically.
 - **UDQ and ACTIONX support** — the `UDQ` expression sub-language and `ACTIONX`
   action blocks are now recognised. Syntax highlighting scopes UDQ control
   words, UDQ functions, and expression operators, plus the `ACTIONX` /
