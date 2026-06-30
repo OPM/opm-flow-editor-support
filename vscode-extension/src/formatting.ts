@@ -497,6 +497,26 @@ export function formatUdqBlock(lines: string[]): string[] {
   return lines.map((line, i) => (parsed[i] !== null ? formatted[idx++] : line));
 }
 
+/**
+ * Decide whether a comment line directly above a record group is that group's
+ * column heading (one label per column) rather than a free-form descriptive
+ * comment. A heading must be a `--` comment whose word count equals the group's
+ * column count `nCols` (and there must be at least two columns).
+ *
+ * The exact-count rule is what keeps ordinary comment lines from being treated
+ * as headings: a prose comment almost never has exactly one word per column,
+ * and the caller only ever offers the line immediately above the table — a
+ * comment elsewhere, or one separated by a blank line, is never considered.
+ * Returns the heading words on a match, else null.
+ */
+export function matchHeadingForGroup(commentLine: string, nCols: number): string[] | null {
+  if (nCols < 2) return null;
+  const m = commentLine.match(/^\s*--\s*(\S.*)$/);
+  if (!m) return null;
+  const words = m[1].trim().split(/\s+/).filter(Boolean);
+  return words.length === nCols ? words : null;
+}
+
 // Parse absolute char positions of each word in a heading comment line (-- word1 word2 ...)
 export function parseHeadingPositions(line: string): number[] | null {
   const m = line.match(/^(\s*--\s*)(.*)/);

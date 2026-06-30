@@ -9,6 +9,7 @@ import {
   formatUdqExpressionGroup,
   formatUdqBlock,
   parseHeadingPositions,
+  matchHeadingForGroup,
   formatRecordGroupWithHeading,
   buildHeadingAndAlignedRecords,
   tokenColumnCount,
@@ -663,6 +664,39 @@ describe('parseHeadingPositions', () => {
     expect(line[positions![1]]).toBe('C');
     expect(positions![0]).toBe(4);
     expect(positions![1]).toBe(9);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// matchHeadingForGroup — the discriminator that keeps ordinary comment lines
+// from being treated as column headings during alignment.
+// ---------------------------------------------------------------------------
+
+describe('matchHeadingForGroup', () => {
+  test('matches a comment with exactly one word per column', () => {
+    expect(matchHeadingForGroup('-- WELL GROUP I J', 4)).toEqual(['WELL', 'GROUP', 'I', 'J']);
+    expect(matchHeadingForGroup('--  Sw   Krw', 2)).toEqual(['Sw', 'Krw']);
+  });
+
+  test('rejects a descriptive comment whose word count differs from the columns', () => {
+    // A prose comment above the table must not be honoured as a heading.
+    expect(matchHeadingForGroup('-- multiplies PERMZ in the upper layers', 8)).toBeNull();
+    expect(matchHeadingForGroup('-- WELL GROUP I', 4)).toBeNull(); // too few
+    expect(matchHeadingForGroup('-- WELL GROUP I J K', 4)).toBeNull(); // too many
+  });
+
+  test('rejects non-comment lines and empty comments', () => {
+    expect(matchHeadingForGroup("'PERMZ' 0.2 1 1", 4)).toBeNull();
+    expect(matchHeadingForGroup('--', 2)).toBeNull();
+    expect(matchHeadingForGroup('--    ', 2)).toBeNull();
+  });
+
+  test('never matches a single-column group', () => {
+    expect(matchHeadingForGroup('-- PORO', 1)).toBeNull();
+  });
+
+  test('tolerates indentation and extra spacing between words', () => {
+    expect(matchHeadingForGroup('   --   A      B  ', 2)).toEqual(['A', 'B']);
   });
 });
 

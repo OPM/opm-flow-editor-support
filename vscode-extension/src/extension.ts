@@ -16,6 +16,7 @@ import {
   parseUdqExpressionLine,
   formatUdqBlock,
   buildHeadingAndAlignedRecords,
+  matchHeadingForGroup,
   tokenColumnCount,
   toggleLineComments,
 } from './formatting';
@@ -824,14 +825,37 @@ function computeAlignEdits(
     // Extract just the record entries for formatting
     const records = entries.filter(e => e.record !== null).map(e => e.record as RecordLine);
 
-    // Columns are aligned from the record data alone. Comment lines — whether
-    // above the group or interspersed within it — are ignored for alignment
-    // and left untouched.
+    // Columns are aligned from the record data. A column heading directly above
+    // the group (a `--` comment with one word per column, as produced by "Add
+    // Column Headers") is honoured: the data is aligned to it and the heading is
+    // kept in sync. Any other comment line — a descriptive comment above the
+    // table, a heading not directly adjacent, or comments interspersed within
+    // the group — is ignored for alignment and left untouched.
     if (records.length > 1) {
       // Check whether the owning keyword is excluded before emitting any edits.
       const activeKw = findActiveKeyword(document, new vscode.Position(i, 0));
       if (!excludedKeywords.has((activeKw ?? '').toUpperCase())) {
-        const formatted = formatRecordGroup(records);
+        // The candidate heading is the line immediately above the first record.
+        const headingLineNum = i - 1;
+        const headingWords =
+          headingLineNum >= 0
+            ? matchHeadingForGroup(document.lineAt(headingLineNum).text, nCols)
+            : null;
+
+        let formatted: string[];
+        if (headingWords) {
+          const built = buildHeadingAndAlignedRecords(records, headingWords);
+          formatted = built.formattedRecords;
+          const headingOrig = document.lineAt(headingLineNum).text;
+          if (built.heading !== headingOrig) {
+            edits.push(
+              vscode.TextEdit.replace(document.lineAt(headingLineNum).range, built.heading),
+            );
+          }
+        } else {
+          formatted = formatRecordGroup(records);
+        }
+
         let recordIdx = 0;
         for (const entry of entries) {
           if (entry.record === null) { continue; } // comment line — leave as-is

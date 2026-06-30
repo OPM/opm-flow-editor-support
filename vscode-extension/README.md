@@ -235,10 +235,14 @@ up at the decimal point position). Keyword headers, comment lines, the closing
 every data line above and below the comment is aligned against a single shared set
 of column widths.
 
-Comments are ignored when aligning: columns are positioned from the record data
-alone, and any comment lines (whether above or within the group) are left exactly
-as they are. A descriptive comment above a table is never mistaken for a column
-heading.
+Comments are ignored when aligning, with one exception: a **column heading**
+directly above the group — a `--` comment with exactly one word per column, as
+produced by [Add Column Headers](#add-column-headers) — is honoured. The records
+are aligned to it and the heading is kept in sync, so a table stays lined up
+under its heading across repeated alignments. Every other comment line is left
+exactly as it is: a descriptive comment above a table (any other word count, or
+one separated by a blank line) is never mistaken for a heading, and comments
+interspersed within the group are untouched.
 
 Before:
 ```
