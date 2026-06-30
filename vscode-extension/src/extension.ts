@@ -15,8 +15,6 @@ import {
   formatRecordGroup,
   parseUdqExpressionLine,
   formatUdqBlock,
-  parseHeadingPositions,
-  formatRecordGroupWithHeading,
   buildHeadingAndAlignedRecords,
   tokenColumnCount,
   toggleLineComments,
@@ -31,8 +29,9 @@ import {
 } from './udq';
 import { buildOutline, OutlineNode } from './outline';
 import { findFileReferences } from './links';
-import { parsePathsAliases, resolvePathAlias, prtCandidatePaths } from './paths';
+import { parsePathsAliases, resolvePathAlias, prtCandidatePaths, collectDeckIncludeFiles } from './paths';
 import { DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
+import { DEFAULT_ALIGN_COLUMNS_EXCLUDED_KEYWORDS } from './align-exclusions';
 import { buildKeywordSnippet } from './boilerplate';
 import { classifyNameParam, collectDeckNames } from './names';
 import {
@@ -749,7 +748,11 @@ function findRecordGroupAtLine(
   return { groupLines, group };
 }
 
-function computeAlignEdits(document: vscode.TextDocument, range?: vscode.Range): vscode.TextEdit[] {
+function computeAlignEdits(
+  document: vscode.TextDocument,
+  range?: vscode.Range,
+  excludedKeywords: ReadonlySet<string> = new Set(),
+): vscode.TextEdit[] {
   const edits: vscode.TextEdit[] = [];
   const first = range ? range.start.line : 0;
   const last = range ? range.end.line : document.lineCount - 1;
@@ -780,10 +783,14 @@ function computeAlignEdits(document: vscode.TextDocument, range?: vscode.Range):
       }
       // Drop trailing comment/blank lines that follow the final statement.
       const tableLen = lastUdqPos + 1;
-      const formatted = formatUdqBlock(blockLines.slice(0, tableLen));
-      for (let j = 0; j < tableLen; j++) {
-        if (formatted[j] !== blockLines[j]) {
-          edits.push(vscode.TextEdit.replace(document.lineAt(blockLineNums[j]).range, formatted[j]));
+      // Check whether the owning keyword is excluded before emitting any edits.
+      const udqKw = findActiveKeyword(document, new vscode.Position(i, 0));
+      if (!excludedKeywords.has((udqKw ?? '').toUpperCase())) {
+        const formatted = formatUdqBlock(blockLines.slice(0, tableLen));
+        for (let j = 0; j < tableLen; j++) {
+          if (formatted[j] !== blockLines[j]) {
+            edits.push(vscode.TextEdit.replace(document.lineAt(blockLineNums[j]).range, formatted[j]));
+          }
         }
       }
       i = blockLineNums[tableLen - 1] + 1;
@@ -817,21 +824,24 @@ function computeAlignEdits(document: vscode.TextDocument, range?: vscode.Range):
     // Extract just the record entries for formatting
     const records = entries.filter(e => e.record !== null).map(e => e.record as RecordLine);
 
-    // Look for a heading comment on the line immediately before the group
-    const headingPositions = i > 0 ? parseHeadingPositions(document.lineAt(i - 1).text) : null;
-    if (records.length > 1 || headingPositions) {
-      const formatted = headingPositions
-        ? formatRecordGroupWithHeading(records, headingPositions)
-        : formatRecordGroup(records);
-      let recordIdx = 0;
-      for (const entry of entries) {
-        if (entry.record === null) { continue; } // comment line — leave as-is
-        const lineRange = document.lineAt(entry.lineNum).range;
-        const orig = document.lineAt(entry.lineNum).text;
-        if (formatted[recordIdx] !== orig) {
-          edits.push(vscode.TextEdit.replace(lineRange, formatted[recordIdx]));
+    // Columns are aligned from the record data alone. Comment lines — whether
+    // above the group or interspersed within it — are ignored for alignment
+    // and left untouched.
+    if (records.length > 1) {
+      // Check whether the owning keyword is excluded before emitting any edits.
+      const activeKw = findActiveKeyword(document, new vscode.Position(i, 0));
+      if (!excludedKeywords.has((activeKw ?? '').toUpperCase())) {
+        const formatted = formatRecordGroup(records);
+        let recordIdx = 0;
+        for (const entry of entries) {
+          if (entry.record === null) { continue; } // comment line — leave as-is
+          const lineRange = document.lineAt(entry.lineNum).range;
+          const orig = document.lineAt(entry.lineNum).text;
+          if (formatted[recordIdx] !== orig) {
+            edits.push(vscode.TextEdit.replace(lineRange, formatted[recordIdx]));
+          }
+          recordIdx++;
         }
-        recordIdx++;
       }
     }
     i = j;
@@ -1005,6 +1015,23 @@ function getExcludedKeywords(resource?: vscode.Uri): ReadonlySet<string> {
   // Normalise: keywords are uppercase by OPM Flow convention; tolerate
   // mixed-case user input by upper-casing on read.
   return new Set(raw.map(k => k.toUpperCase()));
+}
+
+function getAlignColumnsExcludedKeywords(
+  resource?: vscode.Uri,
+  includeDefaults = false,
+): ReadonlySet<string> {
+  const raw = vscode.workspace
+    .getConfiguration('opm-flow.formatting', resource ?? null)
+    .get<string[]>('alignColumnsExcludedKeywords', []);
+  const user = raw.map(k => k.toUpperCase());
+  // The built-in array/grid keyword defaults are applied only when sweeping a
+  // whole deck (so an INCLUDE'd grid file is not silently rewritten). When the
+  // user explicitly aligns the current record or current file, only their own
+  // exclusion list is honoured — they targeted that text deliberately.
+  return new Set(includeDefaults
+    ? [...DEFAULT_ALIGN_COLUMNS_EXCLUDED_KEYWORDS, ...user]
+    : user);
 }
 
 /** A diagnostic carrying the extra fields the quick-fix provider reads back
@@ -1643,7 +1670,6 @@ export function activate(context: vscode.ExtensionContext): void {
     const entry = kwName ? index[kwName] : undefined;
     const record = entry ? findActiveRecord(doc, entry, groupPos) : 1;
     const tokens = group[0].tokens;
-    const nCols = tokens.length;
     const names: string[] = [];
     let paramIdx = 1;
     for (const tok of tokens) {
@@ -1653,52 +1679,32 @@ export function activate(context: vscode.ExtensionContext): void {
       names.push(param?.name ?? `COL${paramIdx}`);
       paramIdx += tokenColumnCount(tok);
     }
-    const prevLineIdx = groupStartLine - 1;
-    const hasHeading = prevLineIdx >= 0 && /^\s*--/.test(doc.lineAt(prevLineIdx).text);
-
-    // When a heading already exists, use its positions as the stable anchor so that
-    // calling the command multiple times is idempotent.
-    if (hasHeading) {
-      const existingPositions = parseHeadingPositions(doc.lineAt(prevLineIdx).text);
-      if (existingPositions && existingPositions.length >= nCols) {
-        const formattedRecords = formatRecordGroupWithHeading(group, existingPositions);
-        // Rebuild heading at the same stable positions (1-space gap guaranteed)
-        let newHeading = '--';
-        for (let c = 0; c < nCols; c++) {
-          const target = Math.max(existingPositions[c] ?? newHeading.length + 1, newHeading.length + 1);
-          while (newHeading.length < target) newHeading += ' ';
-          newHeading += names[c] ?? '';
-        }
-        await editor.edit(b => {
-          for (let k = 0; k < groupLines.length; k++) {
-            b.replace(doc.lineAt(groupLines[k]).range, formattedRecords[k]);
-          }
-          b.replace(doc.lineAt(prevLineIdx).range, newHeading);
-        });
-        return;
-      }
-    }
-
+    // Build the heading and the matching aligned records from the data alone.
+    // Existing comments around the group are ignored and never used as an
+    // alignment anchor, so a descriptive comment above the table cannot be
+    // mistaken for a column heading.
     const { heading, formattedRecords } = buildHeadingAndAlignedRecords(group, names);
+
+    // Idempotency: if the line directly above the group is a heading this
+    // command previously generated (its words are exactly the column names),
+    // replace it in place; otherwise insert a fresh heading above the group.
+    // Any other comment is left untouched.
+    const prevLineIdx = groupStartLine - 1;
+    const prevMatch = prevLineIdx >= 0 ? doc.lineAt(prevLineIdx).text.match(/^\s*--\s*(.*)$/) : null;
+    const prevTokens = prevMatch ? prevMatch[1].trim().split(/\s+/).filter(Boolean) : [];
+    const replaceHeading = prevTokens.length === names.length
+      && prevTokens.every((t, i) => t === names[i]);
+
     await editor.edit(b => {
       for (let k = 0; k < groupLines.length; k++) {
         b.replace(doc.lineAt(groupLines[k]).range, formattedRecords[k]);
       }
-      if (hasHeading) {
+      if (replaceHeading) {
         b.replace(doc.lineAt(prevLineIdx).range, heading);
       } else {
         b.insert(new vscode.Position(groupStartLine, 0), heading + '\n');
       }
     });
-
-    // After inserting the heading, run align so records snap to the new heading positions
-    const headingLine = hasHeading ? prevLineIdx : groupStartLine;
-    const lastGroupLine = groupLines[groupLines.length - 1] + (hasHeading ? 0 : 1);
-    const alignRange = new vscode.Range(headingLine, 0, lastGroupLine, 0);
-    const alignEdits = computeAlignEdits(editor.document, alignRange);
-    if (alignEdits.length > 0) {
-      await editor.edit(b => { for (const e of alignEdits) b.replace(e.range, e.newText); });
-    }
   });
 
   // --- Command: toggle line comment (`--` at the absolute start of line) ---
@@ -1732,16 +1738,96 @@ export function activate(context: vscode.ExtensionContext): void {
     });
   });
 
+  // --- Command: align just the record group under the cursor ---
+  const alignColumnsRecordCommand = vscode.commands.registerCommand('opm-flow.alignRecordColumnsRecord', async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+    const group = findRecordGroupAtLine(editor.document, editor.selection.active.line);
+    if (!group || group.groupLines.length === 0) {
+      vscode.window.showInformationMessage('OPM Flow: no record group at the cursor to align');
+      return;
+    }
+    const firstLine = group.groupLines[0];
+    const lastLine = group.groupLines[group.groupLines.length - 1];
+    const range = new vscode.Range(
+      firstLine, 0, lastLine, editor.document.lineAt(lastLine).text.length,
+    );
+    const excludedKeywords = getAlignColumnsExcludedKeywords(editor.document.uri);
+    const edits = computeAlignEdits(editor.document, range, excludedKeywords);
+    if (edits.length === 0) {
+      vscode.window.showInformationMessage('OPM Flow: nothing to align in the current record');
+      return;
+    }
+    await editor.edit(b => { for (const e of edits) b.replace(e.range, e.newText); });
+  });
+
+  // --- Command: align record columns in the current file (or selection) ---
   const alignColumnsCommand = vscode.commands.registerCommand('opm-flow.alignRecordColumns', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
     const range = editor.selection.isEmpty ? undefined : editor.selection;
-    const edits = computeAlignEdits(editor.document, range);
+    const excludedKeywords = getAlignColumnsExcludedKeywords(editor.document.uri);
+    const edits = computeAlignEdits(editor.document, range, excludedKeywords);
     if (edits.length === 0) {
-      vscode.window.showInformationMessage('OPM Flow: no record groups to align');
+      vscode.window.showInformationMessage('OPM Flow: no record groups to align in the current file');
       return;
     }
     await editor.edit(b => { for (const e of edits) b.replace(e.range, e.newText); });
+  });
+
+  // --- Command: align record columns across the complete deck (all INCLUDE'd files) ---
+  const alignColumnsInDeckCommand = vscode.commands.registerCommand('opm-flow.alignRecordColumnsInDeck', async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+    const rootUri = editor.document.uri;
+    if (rootUri.scheme !== 'file') {
+      vscode.window.showInformationMessage(
+        'OPM Flow: save the file first to align record columns in the complete deck.',
+      );
+      return;
+    }
+    const excludedKeywords = getAlignColumnsExcludedKeywords(rootUri, true);
+    const deckFiles = collectDeckIncludeFiles(rootUri.fsPath, fsPath => {
+      try {
+        return fs.readFileSync(fsPath, 'utf8').split(/\r?\n/);
+      } catch {
+        return null;
+      }
+    });
+    const we = new vscode.WorkspaceEdit();
+    let totalEdits = 0;
+    let filesChanged = 0;
+    for (const fsPath of deckFiles) {
+      const uri = vscode.Uri.file(fsPath);
+      let doc: vscode.TextDocument;
+      try {
+        doc = await vscode.workspace.openTextDocument(uri);
+      } catch {
+        continue;
+      }
+      const fileEdits = computeAlignEdits(doc, undefined, excludedKeywords);
+      if (fileEdits.length > 0) { filesChanged++; }
+      for (const e of fileEdits) {
+        we.replace(uri, e.range, e.newText);
+        totalEdits++;
+      }
+    }
+    if (totalEdits === 0) {
+      vscode.window.showInformationMessage(
+        `OPM Flow: no record groups to align across ${deckFiles.length} deck file(s)`,
+      );
+      return;
+    }
+    const ok = await vscode.workspace.applyEdit(we);
+    if (!ok) {
+      vscode.window.showErrorMessage(
+        'OPM Flow: failed to apply alignment edits across the deck.',
+      );
+      return;
+    }
+    vscode.window.showInformationMessage(
+      `OPM Flow: aligned ${totalEdits} record line(s) in ${filesChanged} of ${deckFiles.length} deck file(s)`,
+    );
   });
 
   // --- Command: open the corresponding .PRT print file ---
@@ -1878,7 +1964,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  context.subscriptions.push(completionProvider, valueCompletionProvider, udqCompletionProvider, codeActionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsCommand, toggleCommentCommand, openPrtCommand, fileLinkProvider, foldingProvider);
+  context.subscriptions.push(completionProvider, valueCompletionProvider, udqCompletionProvider, codeActionProvider, hoverProvider, generateReferenceCommand, addColumnHeadersCommand, alignColumnsRecordCommand, alignColumnsCommand, alignColumnsInDeckCommand, toggleCommentCommand, openPrtCommand, fileLinkProvider, foldingProvider);
 }
 
 export function deactivate(): void {}

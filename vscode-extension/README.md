@@ -215,9 +215,15 @@ you can collapse whole sections at once or drill in one keyword at a time.
 
 ### Align Record Columns
 
-Tidy up record blocks so every column lines up. Invoke **OPM Flow: Align Record Columns**
-from the Command Palette or the editor right-click menu. With a selection it aligns only
-the selected lines; without one it aligns the whole document.
+Tidy up record blocks so every column lines up. Three levels are available from the
+Command Palette or the editor right-click menu, depending on how much you want to touch:
+
+- **OPM Flow: Align Record Columns in Record** — aligns only the record group under
+  the cursor.
+- **OPM Flow: Align Record Columns in File** — aligns the whole current file, or just
+  the selected lines when there is a selection.
+- **OPM Flow: Align Record Columns in Deck** — follows the `INCLUDE` chain and aligns
+  every reachable file (see below).
 
 Groups of consecutive record lines (same token count) are reformatted in place:
 strings left-aligned, integer columns right-aligned, and float columns aligned
@@ -229,8 +235,10 @@ up at the decimal point position). Keyword headers, comment lines, the closing
 every data line above and below the comment is aligned against a single shared set
 of column widths.
 
-If a `--` comment line immediately precedes a record group, the columns are aligned
-to the word positions in that comment, so the data lines up under the headings.
+Comments are ignored when aligning: columns are positioned from the record data
+alone, and any comment lines (whether above or within the group) are left exactly
+as they are. A descriptive comment above a table is never mistaken for a column
+heading.
 
 Before:
 ```
@@ -252,13 +260,32 @@ MULTIPLY
 /
 ```
 
+#### Align across the whole deck
+
+**OPM Flow: Align Record Columns in Deck** starts from the active document,
+follows every `INCLUDE` (resolving `PATHS` aliases) recursively, and aligns the
+record tables in all reachable files in one operation. It reports how many lines
+and files were changed when it finishes.
+
+When sweeping the whole deck, per-cell grid/region/solution arrays (`PORO`, `PERMX`,
+`COORD`, `SATNUM`, …) and large tables (`VFPPROD`/`VFPINJ`) are skipped by default so
+an `INCLUDE`d grid file is not silently rewritten and its deliberate fixed-width layout
+is preserved. The **in Record** and **in File** commands do *not* apply these defaults —
+when you align text you explicitly targeted, everything is aligned.
+
+Add further keywords to skip via `opm-flow.formatting.alignColumnsExcludedKeywords`
+(honoured by all three commands, and *added* to the deck defaults).
+
 ### Add Column Headers
 
 Invoke **OPM Flow: Add Column Headers** from the Command Palette or the right-click menu
 to insert a `--` comment above the record group with parameter names taken from the
 keyword documentation, then align the records to those positions.
 
-If a heading comment already exists it is updated in place. Running the command
+Existing comments around the table are ignored, so a descriptive comment above the
+data is never mistaken for a heading. If the line directly above the group is a
+heading this command previously generated (its words are exactly the column names),
+it is updated in place; otherwise a new heading line is inserted. Running the command
 multiple times is idempotent.
 
 Example — cursor anywhere inside the `VFPIDIMS` record:

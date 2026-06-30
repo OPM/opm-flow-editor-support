@@ -1,0 +1,49 @@
+-- ---------------------------------------------------------------------------
+-- Test deck for the "OPM Flow: Align Record Columns in Deck" command.
+--
+-- Open this file and run the command (Command Palette or editor right-click).
+-- It follows the INCLUDE chain below and aligns the record tables in EVERY
+-- reachable file in a single operation:
+--
+--   DECK_ALIGN.DATA            (this file - WELSPECS table below)
+--     +-- include/schedule.inc (WCONPROD / GCONPROD tables, via $INC alias)
+--           +-- include/wells.inc   (COMPDAT table, nested INCLUDE)
+--
+-- Every record table here is deliberately MIS-aligned so the effect of the
+-- command is obvious. Running the command should leave each column lined up.
+-- ---------------------------------------------------------------------------
+
+RUNSPEC
+
+DIMENS
+ 10 10 3 /
+
+OIL
+WATER
+GAS
+
+-- PATHS alias used by the first INCLUDE below, to exercise alias resolution
+-- while collecting the deck's include files.
+PATHS
+ 'INC' './include' /
+/
+
+GRID
+
+DX
+ 300*100 /
+
+SCHEDULE
+
+-- Misaligned record table in the ROOT file (should be aligned in place):
+WELSPECS
+ 'PROD1' 'G1' 1 1 1* 'OIL' /
+ 'PROD2' 'G1' 10 10 1* 'OIL' /
+ 'INJ1' 'G2' 5 5 1* 'WATER' /
+/
+
+-- INCLUDE via the $INC PATHS alias.
+INCLUDE
+ '$INC/schedule.inc' /
+
+END
