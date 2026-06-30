@@ -35,6 +35,11 @@ import { parsePathsAliases, resolvePathAlias, prtCandidatePaths } from './paths'
 import { DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
 import { buildKeywordSnippet } from './boilerplate';
 import { classifyNameParam, collectDeckNames } from './names';
+import {
+  buildDeckCommand,
+  SimulatorConfig,
+  SimulatorMode,
+} from './simulator';
 
 interface Parameter {
   index: number | string;
@@ -1153,6 +1158,94 @@ async function retagDocumentIfMatches(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Simulator integration — optional verify / run via a local `flow` binary
+// ---------------------------------------------------------------------------
+
+/** Read the `opm-flow.simulator.*` settings for the given resource. */
+function getSimulatorConfig(resource?: vscode.Uri): SimulatorConfig {
+  const c = vscode.workspace.getConfiguration('opm-flow.simulator', resource ?? null);
+  return {
+    executablePath: c.get<string>('executablePath', 'flow'),
+    useWsl: c.get<boolean>('useWsl', false),
+    wslDistribution: c.get<string>('wslDistribution', '').trim(),
+    runArgs: c.get<string[]>('runArgs', []),
+    verifyArgs: c.get<string[]>('verifyArgs', ['--enable-dry-run=true']),
+  };
+}
+
+// A single reusable terminal, recreated when the required shell changes
+// (e.g. the WSL distribution setting was edited).
+let simulatorTerminal: vscode.Terminal | undefined;
+let simulatorTerminalSignature: string | undefined;
+
+/** Resolve the deck file to act on, or report why none is available. */
+function resolveDeckTarget(resource?: vscode.Uri): vscode.Uri | undefined {
+  const target = resource ?? vscode.window.activeTextEditor?.document.uri;
+  if (!target || target.scheme !== 'file') {
+    vscode.window.showInformationMessage(
+      'OPM Flow: open a deck (.DATA) file to run or verify it.',
+    );
+    return undefined;
+  }
+  return target;
+}
+
+/** Launch flow on `target` in mode, in a (reused) integrated terminal. */
+async function runSimulatorOnDeck(
+  mode: SimulatorMode,
+  target: vscode.Uri,
+): Promise<void> {
+  const cfg = getSimulatorConfig(target);
+  const isWindows = process.platform === 'win32';
+
+  // Running a native Windows flow from the integrated terminal would route the
+  // POSIX command line through PowerShell/cmd. Steer the user to WSL instead.
+  if (isWindows && !cfg.useWsl) {
+    const pick = await vscode.window.showWarningMessage(
+      'OPM Flow: running the simulator on Windows requires WSL. Enable '
+      + '"opm-flow.simulator.useWsl" and set the executable path (e.g. /usr/bin/flow).',
+      'Open Settings',
+    );
+    if (pick === 'Open Settings') {
+      await vscode.commands.executeCommand(
+        'workbench.action.openSettings', 'opm-flow.simulator',
+      );
+    }
+    return;
+  }
+
+  // WSL only exists on Windows; on Linux/macOS run flow natively even if the
+  // (portable) setting happens to be on.
+  const effectiveCfg: SimulatorConfig = { ...cfg, useWsl: cfg.useWsl && isWindows };
+  const cmd = buildDeckCommand(target.fsPath, mode, effectiveCfg);
+
+  // Reuse the terminal unless its shell no longer matches what we need.
+  if (simulatorTerminal && simulatorTerminal.exitStatus !== undefined) {
+    simulatorTerminal = undefined; // user closed it
+  }
+  if (simulatorTerminal && simulatorTerminalSignature !== cmd.shellSignature) {
+    simulatorTerminal.dispose();
+    simulatorTerminal = undefined;
+  }
+  if (!simulatorTerminal) {
+    simulatorTerminal = vscode.window.createTerminal({
+      name: 'OPM Flow',
+      shellPath: cmd.shellPath,
+      shellArgs: cmd.shellArgs,
+    });
+    simulatorTerminalSignature = cmd.shellSignature;
+  }
+
+  simulatorTerminal.show(true);
+  if (mode === 'verify') {
+    vscode.window.setStatusBarMessage(
+      `OPM Flow: verifying ${path.basename(target.fsPath)}…`, 4000,
+    );
+  }
+  simulatorTerminal.sendText(cmd.commandLine);
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const index = loadKeywordIndex(context);
   const keywords = Object.keys(index);
@@ -1675,6 +1768,29 @@ export function activate(context: vscode.ExtensionContext): void {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(found));
       await vscode.window.showTextDocument(doc, { preview: false });
     },
+  );
+
+  // --- Commands: verify (dry-run load check) / run the deck via `flow` ---
+  const verifyDeckCommand = vscode.commands.registerCommand(
+    'opm-flow.verifyDeck',
+    async (resource?: vscode.Uri) => {
+      const target = resolveDeckTarget(resource);
+      if (target) await runSimulatorOnDeck('verify', target);
+    },
+  );
+  const runSimulationCommand = vscode.commands.registerCommand(
+    'opm-flow.runSimulation',
+    async (resource?: vscode.Uri) => {
+      const target = resolveDeckTarget(resource);
+      if (target) await runSimulatorOnDeck('run', target);
+    },
+  );
+  context.subscriptions.push(
+    verifyDeckCommand,
+    runSimulationCommand,
+    vscode.window.onDidCloseTerminal(t => {
+      if (t === simulatorTerminal) simulatorTerminal = undefined;
+    }),
   );
 
   // --- File-reference link provider (INCLUDE / IMPORT / RESTART / GDFILE) ---

@@ -145,12 +145,30 @@
       {
         "command": "opm-flow.openPrtFile",
         "title": "OPM Flow: Open PRT File"
+      },
+      {
+        "command": "opm-flow.verifyDeck",
+        "title": "OPM Flow: Verify Deck (dry run)"
+      },
+      {
+        "command": "opm-flow.runSimulation",
+        "title": "OPM Flow: Run Simulation"
       }
     ],
     "menus": {
       "editor/context": [
         {
           "command": "opm-flow.openPrtFile",
+          "when": "resourceLangId == opm-flow && resourceExtname =~ /^\\.data$/i",
+          "group": "opm-flow"
+        },
+        {
+          "command": "opm-flow.verifyDeck",
+          "when": "resourceLangId == opm-flow && resourceExtname =~ /^\\.data$/i",
+          "group": "opm-flow"
+        },
+        {
+          "command": "opm-flow.runSimulation",
           "when": "resourceLangId == opm-flow && resourceExtname =~ /^\\.data$/i",
           "group": "opm-flow"
         },
@@ -265,6 +283,44 @@
           },
           "default": [],
           "description": "Extra file extensions (with or without a leading '.') that should open as OPM Flow. Useful for project-specific include-file conventions not covered by the built-in extension list. Matched case-insensitively. Example: [\".myinc\", \"props2\"]. For one-off cases the VS Code-native `files.associations` setting still works too.",
+          "scope": "resource"
+        },
+        "opm-flow.simulator.executablePath": {
+          "type": "string",
+          "default": "flow",
+          "markdownDescription": "Path to the OPM Flow executable used by the **Verify Deck** and **Run Simulation** commands. When `#opm-flow.simulator.useWsl#` is enabled this must be a path *inside* WSL (e.g. `/usr/bin/flow`); otherwise a native path or a name on `PATH`.",
+          "scope": "resource"
+        },
+        "opm-flow.simulator.useWsl": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Run the simulator through WSL (`wsl.exe`). Required on Windows, where OPM Flow is typically installed inside a Linux distribution. The deck's Windows path is translated to its `/mnt/<drive>` mount point automatically.",
+          "scope": "resource"
+        },
+        "opm-flow.simulator.wslDistribution": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "WSL distribution to run the simulator in (e.g. `ubuntu-26.04`). Leave empty to use the default distribution. List installed distributions with `wsl -l -v`. Only used when `#opm-flow.simulator.useWsl#` is enabled.",
+          "scope": "resource"
+        },
+        "opm-flow.simulator.verifyArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "--enable-dry-run=true"
+          ],
+          "markdownDescription": "Arguments passed to flow by **Verify Deck (dry run)**. The default `--enable-dry-run=true` fully parses the deck and initializes the model (grid, properties, wells, schedule) without simulating the time steps — a fast check that the deck and everything it pulls in via `INCLUDE` / `PATHS` loads cleanly. Add `--parsing-strictness=high` to also fail on unsupported keywords.",
+          "scope": "resource"
+        },
+        "opm-flow.simulator.runArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Extra arguments passed to flow by **Run Simulation** (e.g. `--output-dir=...`, `--threads-per-process=4`). The deck file is supplied automatically.",
           "scope": "resource"
         }
       }
