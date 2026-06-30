@@ -58,12 +58,50 @@ export function classifyNameParam(param: NameParam): NameKind | null {
 export interface DeckNames {
   wells: string[];
   groups: string[];
+  /**
+   * Names (well or group) that were declared with surrounding single quotes in
+   * at least one WELSPECS / GRUPTREE record. Completion uses this to insert a
+   * name in the same quoted/bare style it was originally written. A name
+   * declared both ways is treated as quoted, since quoting is always valid.
+   */
+  quoted: Set<string>;
+}
+
+/** True when a deck token is wrapped in single quotes (`'OP01'`). */
+function isQuoted(token: string): boolean {
+  return token.startsWith("'");
 }
 
 /** Strip surrounding single quotes from a deck token, trimming inner padding. */
 function unquote(token: string): string {
   if (token.startsWith("'")) return token.replace(/^'|'$/g, '').trim();
   return token;
+}
+
+/**
+ * Natural (human) order for deck names: split each name into alternating
+ * text / number chunks and compare numeric chunks by value, so the list reads
+ * PROD2 < PROD12 < PROD21 rather than the lexicographic PROD12 < PROD2 < PROD21.
+ * Text chunks compare case-insensitively.
+ */
+export function compareNamesNatural(a: string, b: string): number {
+  const ax = a.match(/\d+|\D+/g) ?? [];
+  const bx = b.match(/\d+|\D+/g) ?? [];
+  const n = Math.min(ax.length, bx.length);
+  for (let i = 0; i < n; i++) {
+    const as = ax[i];
+    const bs = bx[i];
+    const bothNumeric = /^\d/.test(as) && /^\d/.test(bs);
+    if (bothNumeric) {
+      const d = Number(as) - Number(bs);
+      if (d !== 0) return d;
+    } else {
+      const al = as.toLowerCase();
+      const bl = bs.toLowerCase();
+      if (al !== bl) return al < bl ? -1 : 1;
+    }
+  }
+  return ax.length - bx.length;
 }
 
 /** A token usable as a name: non-empty and not a default placeholder (`1*`, `*`). */
@@ -94,7 +132,15 @@ export function collectDeckNames(
 ): DeckNames {
   const wells = new Set<string>();
   const groups = new Set<string>();
+  const quoted = new Set<string>();
   let active: 'WELSPECS' | 'GRUPTREE' | null = null;
+
+  // Record a harvested name and remember whether it was written quoted.
+  const add = (set: Set<string>, name: string, wasQuoted: boolean): void => {
+    if (!isUsableName(name)) return;
+    set.add(name);
+    if (wasQuoted) quoted.add(name);
+  };
 
   for (const raw of lines) {
     if (isCommentLine(raw)) continue;
@@ -121,20 +167,23 @@ export function collectDeckNames(
 
     const tokens = tokenizeLine(raw);
     if (!tokens.length) continue;
-    const first = unquote(tokens[0].text);
-    const second = tokens[1] ? unquote(tokens[1].text) : '';
+    const firstTok = tokens[0].text;
+    const secondTok = tokens[1] ? tokens[1].text : '';
+    const first = unquote(firstTok);
+    const second = unquote(secondTok);
 
     if (active === 'WELSPECS') {
-      if (isUsableName(first)) wells.add(first);
-      if (isUsableName(second)) groups.add(second);
+      add(wells, first, isQuoted(firstTok));
+      add(groups, second, isQuoted(secondTok));
     } else {
-      if (isUsableName(first)) groups.add(first);
-      if (isUsableName(second)) groups.add(second);
+      add(groups, first, isQuoted(firstTok));
+      add(groups, second, isQuoted(secondTok));
     }
   }
 
   return {
-    wells: [...wells].sort(),
-    groups: [...groups].sort(),
+    wells: [...wells].sort(compareNamesNatural),
+    groups: [...groups].sort(compareNamesNatural),
+    quoted,
   };
 }

@@ -1,4 +1,4 @@
-import { classifyNameParam, collectDeckNames } from './names';
+import { classifyNameParam, collectDeckNames, compareNamesNatural } from './names';
 
 describe('classifyNameParam', () => {
   it('classifies the common well-name items', () => {
@@ -49,7 +49,35 @@ const KNOWN = new Set([
 ]);
 const isKnown = (t: string) => KNOWN.has(t);
 
+describe('compareNamesNatural', () => {
+  it('orders names by numeric value, not lexicographically', () => {
+    const sorted = ['PROD21', 'PROD2', 'PROD12'].sort(compareNamesNatural);
+    expect(sorted).toEqual(['PROD2', 'PROD12', 'PROD21']);
+  });
+
+  it('groups by prefix then number', () => {
+    const sorted = ['INJ1', 'PROD10', 'PROD2', 'INJ10', 'PROD1'].sort(compareNamesNatural);
+    expect(sorted).toEqual(['INJ1', 'INJ10', 'PROD1', 'PROD2', 'PROD10']);
+  });
+
+  it('handles names with no digits and mixed segments', () => {
+    const sorted = ['B-2H', 'B-10H', 'B-1H', 'A'].sort(compareNamesNatural);
+    expect(sorted).toEqual(['A', 'B-1H', 'B-2H', 'B-10H']);
+  });
+});
+
 describe('collectDeckNames', () => {
+  it('returns names in natural numeric order', () => {
+    const lines = [
+      'WELSPECS',
+      'PROD21  G  1 1 /',
+      'PROD2   G  1 1 /',
+      'PROD12  G  1 1 /',
+      '/',
+    ];
+    expect(collectDeckNames(lines, isKnown).wells).toEqual(['PROD2', 'PROD12', 'PROD21']);
+  });
+
   it('harvests bare well and group names from WELSPECS', () => {
     const lines = [
       'WELSPECS',
@@ -61,6 +89,7 @@ describe('collectDeckNames', () => {
     expect(collectDeckNames(lines, isKnown)).toEqual({
       wells: ['OP01', 'OP02', 'WI01'],
       groups: ['PLAT-1', 'PLAT-2'],
+      quoted: new Set(),
     });
   });
 
@@ -77,7 +106,25 @@ describe('collectDeckNames', () => {
     expect(collectDeckNames(lines, isKnown)).toEqual({
       wells: ['B-1H'],
       groups: ['B1', 'FIELD', 'PLAT'],
+      quoted: new Set(['B-1H', 'B1', 'FIELD', 'PLAT']),
     });
+  });
+
+  it('records the declared quote style per name and treats mixed as quoted', () => {
+    const lines = [
+      'WELSPECS',
+      "  'B-1H'   B1     11  3  1*  OIL  /", // well quoted, parent group bare
+      '  OP01     PLAT   3   7  1*  OIL  /', // well bare
+      '/',
+      'GRUPTREE',
+      "  'B1'      PLAT   /",                // B1 now quoted -> quoted wins
+      '/',
+    ];
+    const { quoted } = collectDeckNames(lines, isKnown);
+    expect(quoted.has('B-1H')).toBe(true);
+    expect(quoted.has('B1')).toBe(true);   // bare in WELSPECS, quoted in GRUPTREE
+    expect(quoted.has('OP01')).toBe(false);
+    expect(quoted.has('PLAT')).toBe(false);
   });
 
   it('ignores default placeholders and comments', () => {
@@ -131,6 +178,7 @@ describe('collectDeckNames', () => {
     expect(collectDeckNames(['RUNSPEC', 'DIMENS', '10 10 3 /'], isKnown)).toEqual({
       wells: [],
       groups: [],
+      quoted: new Set(),
     });
   });
 });

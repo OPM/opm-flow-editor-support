@@ -1460,14 +1460,23 @@ export function activate(context: vscode.ExtensionContext): void {
           kind: vscode.CompletionItemKind,
           detailText: string,
           doc?: vscode.MarkdownString,
+          // When set, emit only this form regardless of `style` — used by the
+          // name path so a completed well/group name follows the quoted/bare
+          // style it was declared with. An open quote at the cursor still wins.
+          forceQuoted?: boolean,
+          // Overrides the value as the sort key. The name path passes a
+          // padded ordinal so VS Code preserves the caller's natural ordering
+          // (PROD2, PROD12, PROD21) instead of re-sorting by the label string.
+          sortKey?: string,
         ): vscode.CompletionItem[] => {
           const make = (insert: string, formRank: string): vscode.CompletionItem => {
             const item = new vscode.CompletionItem(insert, kind);
             item.insertText = insert;
             // Match against the bare value so typing `OP` finds `OPEN`/`'OPEN'`.
             item.filterText = filter;
-            // Sort by value then form, so each value's bare/quoted pair groups.
-            item.sortText = `${filter}${formRank}`;
+            // Sort by value (or caller key) then form, so each value's
+            // bare/quoted pair groups.
+            item.sortText = `${sortKey ?? filter}${formRank}`;
             item.detail = detailText;
             if (doc) item.documentation = doc;
             if (replaceRange) item.range = replaceRange;
@@ -1476,6 +1485,7 @@ export function activate(context: vscode.ExtensionContext): void {
           const quoted = make(`'${value}'`, '1');
           if (quotedTok) return [quoted];
           const bare = make(value, '0');
+          if (forceQuoted !== undefined) return [forceQuoted ? quoted : bare];
           if (style === 'quoted') return [quoted];
           if (style === 'unquoted') return [bare];
           return [bare, quoted];
@@ -1493,8 +1503,13 @@ export function activate(context: vscode.ExtensionContext): void {
           if (!pool.length) return [];
           const label = nameKind === 'well' ? 'well name' : 'group name';
           const detailN = `${kwName} parameter ${param.index}: ${label}`;
-          return pool.flatMap(name =>
-            buildForms(name, name, vscode.CompletionItemKind.Value, detailN),
+          // `pool` is already in natural order; a padded ordinal as the sort
+          // key keeps VS Code from re-sorting the list lexicographically.
+          return pool.flatMap((name, i) =>
+            buildForms(
+              name, name, vscode.CompletionItemKind.Value, detailN, undefined,
+              names.quoted.has(name), String(i).padStart(6, '0'),
+            ),
           );
         }
 
