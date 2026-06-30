@@ -158,34 +158,34 @@
     "menus": {
       "editor/context": [
         {
-          "command": "opm-flow.openPrtFile",
-          "when": "resourceLangId == opm-flow && resourceExtname =~ /^\\.data$/i",
-          "group": "opm-flow"
-        },
-        {
-          "command": "opm-flow.verifyDeck",
-          "when": "resourceLangId == opm-flow && resourceExtname =~ /^\\.data$/i",
-          "group": "opm-flow"
-        },
-        {
-          "command": "opm-flow.runSimulation",
-          "when": "resourceLangId == opm-flow && resourceExtname =~ /^\\.data$/i",
-          "group": "opm-flow"
-        },
-        {
           "command": "opm-flow.alignRecordColumns",
           "when": "resourceLangId == opm-flow",
-          "group": "opm-flow"
+          "group": "opmflow_1_format@1"
         },
         {
           "command": "opm-flow.addColumnHeaders",
           "when": "resourceLangId == opm-flow",
-          "group": "opm-flow"
+          "group": "opmflow_1_format@2"
         },
         {
           "command": "opm-flow.toggleLineComment",
           "when": "resourceLangId == opm-flow",
-          "group": "opm-flow"
+          "group": "opmflow_1_format@3"
+        },
+        {
+          "command": "opm-flow.openPrtFile",
+          "when": "resourceLangId == opm-flow && resourceExtname =~ /^\\.data$/i",
+          "group": "opmflow_2_navigation@1"
+        },
+        {
+          "command": "opm-flow.verifyDeck",
+          "when": "resourceLangId == opm-flow && resourceExtname =~ /^\\.data$/i",
+          "group": "opmflow_3_run@1"
+        },
+        {
+          "command": "opm-flow.runSimulation",
+          "when": "resourceLangId == opm-flow && resourceExtname =~ /^\\.data$/i",
+          "group": "opmflow_3_run@2"
         }
       ]
     },
