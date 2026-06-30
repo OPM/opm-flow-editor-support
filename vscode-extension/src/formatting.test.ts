@@ -867,6 +867,92 @@ describe('buildHeadingAndAlignedRecords', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Configurable leading indent (number of spaces before each row)
+// ---------------------------------------------------------------------------
+
+describe('row indent option', () => {
+  // First column is a left-aligned string so its token starts immediately after
+  // the group indent — the indent is then directly observable on each row.
+  const rec = (tokens: string[], indent = ' '): RecordLine => ({
+    indent, tokens, trailComment: '', hasTerminator: true,
+  });
+
+  test('formatRecordGroup forces the given number of leading spaces', () => {
+    const records = [rec(["'AA'", '1']), rec(["'BB'", '20'])];
+    expect(formatRecordGroup(records, 2).every(l => l.startsWith("  '"))).toBe(true);
+    expect(formatRecordGroup(records, 4).every(l => l.startsWith("    '"))).toBe(true);
+  });
+
+  test('formatRecordGroup overrides whatever indent the records had', () => {
+    const records = [rec(["'AA'", '1'], '      '), rec(["'BB'", '2'], '      ')];
+    expect(formatRecordGroup(records, 2).every(l => l.startsWith("  '"))).toBe(true);
+  });
+
+  test('formatRecordGroup with indent 0 starts at column 0', () => {
+    const out = formatRecordGroup([rec(["'AA'", '1']), rec(["'BB'", '2'])], 0);
+    expect(out.every(l => l.startsWith("'"))).toBe(true);
+  });
+
+  test('formatRecordGroup without the argument keeps the existing indent', () => {
+    const out = formatRecordGroup([rec(["'AA'", '1'], '   '), rec(["'BB'", '2'], '   ')]);
+    expect(out.every(l => l.startsWith("   '"))).toBe(true);
+  });
+
+  test('buildHeadingAndAlignedRecords indents rows and heading words alike', () => {
+    const records = [rec(["'AA'", '2']), rec(["'BB'", '40'])];
+    const { heading, formattedRecords } =
+      buildHeadingAndAlignedRecords(records, ['NAME', 'B'], 4);
+    // Records start with 4 spaces; the heading's first word also lands at col 4.
+    expect(formattedRecords.every(l => l.startsWith("    '"))).toBe(true);
+    expect(heading.indexOf('NAME')).toBe(4);
+  });
+
+  test('formatUdqExpressionGroup applies the indent', () => {
+    const out = formatUdqExpressionGroup(
+      [
+        parseUdqExpressionLine("DEFINE FU_A (WOPR 'P1') /")!,
+        parseUdqExpressionLine("DEFINE FU_B (WOPR 'P2') /")!,
+      ],
+      2,
+    );
+    expect(out.every(l => /^ {2}DEFINE/.test(l))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Single-row tables — alignment still applies the indent and normalises spacing
+// even when there is only one record to lay out.
+// ---------------------------------------------------------------------------
+
+describe('single-row table alignment', () => {
+  test('formatRecordGroup indents and single-spaces a lone record', () => {
+    const r: RecordLine = {
+      indent: '', tokens: ["'AA'", '1', '200'], trailComment: '', hasTerminator: true,
+    };
+    expect(formatRecordGroup([r], 2)).toEqual(["  'AA' 1 200 /"]);
+  });
+
+  test('formatRecordGroup collapses ragged spacing on a lone record', () => {
+    const r = parseRecordLine("      10     10    3 /")!;
+    expect(formatRecordGroup([r], 2)).toEqual(['  10 10 3 /']);
+  });
+
+  test('buildHeadingAndAlignedRecords keeps a lone record under its heading', () => {
+    const r = parseRecordLine('30 20 20 /')!;
+    const { heading, formattedRecords } =
+      buildHeadingAndAlignedRecords([r], ['MXMFLO', 'MXMTHP', 'MXVFPTAB'], 3);
+    expect(heading).toBe('-- MXMFLO MXMTHP MXVFPTAB');
+    expect(formattedRecords).toHaveLength(1);
+    expect(formattedRecords[0].startsWith('   ')).toBe(true);
+  });
+
+  test('formatUdqBlock aligns a single UDQ statement', () => {
+    const out = formatUdqBlock(["DEFINE   FU_A   (WOPR 'P1') /"], 2);
+    expect(out).toEqual(["  DEFINE FU_A (WOPR 'P1') /"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // columnForCompletion
 // ---------------------------------------------------------------------------
 

@@ -231,6 +231,13 @@ on the decimal point (integers and `N*` repeat markers in a float column line
 up at the decimal point position). Keyword headers, comment lines, the closing
 `/`, and trailing `-- comments` are left untouched.
 
+Each row is given a fixed leading indent: `opm-flow.formatting.recordIndent`
+(default `2`) for a plain table, or `opm-flow.formatting.headingIndent`
+(default `3`) when the table has a column heading — see [Settings](#settings).
+A single-row table is aligned as well: it has no other rows to line up against,
+but it still gets the configured indent and single-space column separation (and
+stays in sync with a heading above it).
+
 `--` comment lines interspersed within a record group no longer break the group —
 every data line above and below the comment is aligned against a single shared set
 of column widths.
@@ -388,6 +395,8 @@ you can override them per-workspace or per-folder.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `opm-flow.formatting.alignColumnsExcludedKeywords` | `[]` | Extra keywords to skip when aligning record columns. Names are upper-cased on read; matching is case-insensitive. Honoured by all three [Align Record Columns](#align-record-columns) commands, and *added* to the built-in deck-sweep defaults (per-cell grid/region arrays like `PORO`/`PERMX`/`COORD` and large `VFPPROD`/`VFPINJ` tables, which **Align … in Deck** already skips). |
+| `opm-flow.formatting.recordIndent` | `2` | Number of spaces placed before each record row when aligning a table that has **no** column heading. Applied by every [Align Record Columns](#align-record-columns) command (and to `UDQ` statement blocks). |
+| `opm-flow.formatting.headingIndent` | `3` | Number of spaces placed before each record row when the table **has** a column heading (a `--` comment with one label per column). Applied by [Add Column Headers](#add-column-headers) and when alignment keeps a table lined up under its heading. |
 
 ### Simulator
 

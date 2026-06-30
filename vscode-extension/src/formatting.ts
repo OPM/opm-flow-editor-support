@@ -331,9 +331,14 @@ function formatDecimalToken(t: string, intLen: number, colWidth: number): string
 // Record group formatting
 // ---------------------------------------------------------------------------
 
-export function formatRecordGroup(records: RecordLine[]): string[] {
+/**
+ * Align a record group into columns. `indent`, when given, is the number of
+ * leading spaces every row starts with (replacing whatever indent the records
+ * had); when omitted the first record's existing indent is kept.
+ */
+export function formatRecordGroup(records: RecordLine[], indent?: number): string[] {
   const meta = computeColMeta(records);
-  const groupIndent = records[0].indent;
+  const groupIndent = indent !== undefined ? ' '.repeat(indent) : records[0].indent;
   return records.map(r => {
     const cells = r.tokens.map((t, c) => {
       const m = meta[c];
@@ -455,11 +460,11 @@ export function parseUdqExpressionLine(line: string): UdqRecord | null {
  * left-aligned, and the expression right-aligned so every statement's
  * terminating '/' lines up. Expression tokens are single-space separated.
  */
-export function formatUdqExpressionGroup(records: UdqRecord[]): string[] {
+export function formatUdqExpressionGroup(records: UdqRecord[], indent?: number): string[] {
   const ctrlWidth = Math.max(...records.map(r => r.control.length));
   const nameWidth = Math.max(...records.map(r => r.name.length));
   const maxExprLen = Math.max(0, ...records.map(r => r.expr.length));
-  const groupIndent = records[0].indent;
+  const groupIndent = indent !== undefined ? ' '.repeat(indent) : records[0].indent;
   // Width of the fixed left part: control word + separator + name column.
   const prefixLen = ctrlWidth + 1 + nameWidth;
   // Column at which the right-aligned expression ends (and the '/' follows).
@@ -484,15 +489,15 @@ export function formatUdqExpressionGroup(records: UdqRecord[]): string[] {
  * Comment lines are returned verbatim and do not participate in the column
  * computation; every UDQ statement in the block is aligned together (the
  * comment does not split the table), so all columns stay consistent across it.
- * Returns one output line per input line (same length). When the block holds
- * fewer than two UDQ statements there is nothing to align and the input is
- * returned unchanged.
+ * Returns one output line per input line (same length). A single statement is
+ * still aligned (it gets the configured indent and normalised spacing); an
+ * empty block is returned unchanged.
  */
-export function formatUdqBlock(lines: string[]): string[] {
+export function formatUdqBlock(lines: string[], indent?: number): string[] {
   const parsed = lines.map(parseUdqExpressionLine);
   const records = parsed.filter((r): r is UdqRecord => r !== null);
-  if (records.length < 2) return lines.slice();
-  const formatted = formatUdqExpressionGroup(records);
+  if (records.length < 1) return lines.slice();
+  const formatted = formatUdqExpressionGroup(records, indent);
   let idx = 0;
   return lines.map((line, i) => (parsed[i] !== null ? formatted[idx++] : line));
 }
@@ -581,7 +586,8 @@ export function formatRecordGroupWithHeading(records: RecordLine[], headingPosit
 // Build a heading comment and consistently aligned records in one pass
 export function buildHeadingAndAlignedRecords(
   records: RecordLine[],
-  names: string[]
+  names: string[],
+  indent?: number,
 ): { heading: string; formattedRecords: string[] } {
   const nCols = records[0].tokens.length;
   const meta = computeColMeta(records);
@@ -589,8 +595,10 @@ export function buildHeadingAndAlignedRecords(
   // Effective column width = max of data effective width and heading name width
   const colWidths = meta.map((m, c) => Math.max(m.effectiveWidth, names[c]?.length ?? 0));
 
-  // Column start positions
-  const baseIndent = records[0].indent.length;
+  // Column start positions. `indent`, when given, is the number of leading
+  // spaces every record row (and the heading's first column) starts with;
+  // otherwise the first record's existing indent is kept.
+  const baseIndent = indent !== undefined ? indent : records[0].indent.length;
   const colStarts: number[] = [baseIndent];
   for (let c = 1; c < nCols; c++) {
     colStarts[c] = colStarts[c - 1] + colWidths[c - 1] + 1;

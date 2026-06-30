@@ -349,6 +349,20 @@
           "default": [],
           "description": "Extra keywords whose record tables are skipped by the Align Record Columns commands. Names are matched case-insensitively. The whole-deck command additionally skips a built-in set of per-cell grid/region/solution arrays (PORO, PERMX, COORD, SATNUM, …) and large tables (VFPPROD/VFPINJ) so INCLUDE'd grid files keep their fixed-width layout; the keywords listed here are added to that set. The in-Record and in-File commands apply only the keywords listed here.",
           "scope": "resource"
+        },
+        "opm-flow.formatting.recordIndent": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 2,
+          "description": "Number of spaces inserted before each record row when aligning a record table that has no column heading. Applied by all Align Record Columns commands.",
+          "scope": "resource"
+        },
+        "opm-flow.formatting.headingIndent": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 3,
+          "description": "Number of spaces inserted before each record row when the table has a column heading (a -- comment with one label per column). Applied by Add Column Headers and when Align Record Columns aligns a table under its heading.",
+          "scope": "resource"
         }
       }
     }

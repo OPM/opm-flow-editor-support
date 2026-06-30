@@ -753,6 +753,7 @@ function computeAlignEdits(
   document: vscode.TextDocument,
   range?: vscode.Range,
   excludedKeywords: ReadonlySet<string> = new Set(),
+  indents: AlignIndents = { record: 2, heading: 3 },
 ): vscode.TextEdit[] {
   const edits: vscode.TextEdit[] = [];
   const first = range ? range.start.line : 0;
@@ -787,7 +788,7 @@ function computeAlignEdits(
       // Check whether the owning keyword is excluded before emitting any edits.
       const udqKw = findActiveKeyword(document, new vscode.Position(i, 0));
       if (!excludedKeywords.has((udqKw ?? '').toUpperCase())) {
-        const formatted = formatUdqBlock(blockLines.slice(0, tableLen));
+        const formatted = formatUdqBlock(blockLines.slice(0, tableLen), indents.record);
         for (let j = 0; j < tableLen; j++) {
           if (formatted[j] !== blockLines[j]) {
             edits.push(vscode.TextEdit.replace(document.lineAt(blockLineNums[j]).range, formatted[j]));
@@ -831,7 +832,11 @@ function computeAlignEdits(
     // kept in sync. Any other comment line — a descriptive comment above the
     // table, a heading not directly adjacent, or comments interspersed within
     // the group — is ignored for alignment and left untouched.
-    if (records.length > 1) {
+    //
+    // A single-row table is aligned too: there are no other rows to line up
+    // against, but the row still gets the configured indent and single-space
+    // column separation (and stays in sync with a heading above it).
+    if (records.length >= 1) {
       // Check whether the owning keyword is excluded before emitting any edits.
       const activeKw = findActiveKeyword(document, new vscode.Position(i, 0));
       if (!excludedKeywords.has((activeKw ?? '').toUpperCase())) {
@@ -844,7 +849,7 @@ function computeAlignEdits(
 
         let formatted: string[];
         if (headingWords) {
-          const built = buildHeadingAndAlignedRecords(records, headingWords);
+          const built = buildHeadingAndAlignedRecords(records, headingWords, indents.heading);
           formatted = built.formattedRecords;
           const headingOrig = document.lineAt(headingLineNum).text;
           if (built.heading !== headingOrig) {
@@ -853,7 +858,7 @@ function computeAlignEdits(
             );
           }
         } else {
-          formatted = formatRecordGroup(records);
+          formatted = formatRecordGroup(records, indents.record);
         }
 
         let recordIdx = 0;
@@ -1056,6 +1061,25 @@ function getAlignColumnsExcludedKeywords(
   return new Set(includeDefaults
     ? [...DEFAULT_ALIGN_COLUMNS_EXCLUDED_KEYWORDS, ...user]
     : user);
+}
+
+/** Leading-space counts applied to record rows when aligning columns. */
+interface AlignIndents {
+  /** Spaces before a plain record group (no column heading). Default 2. */
+  record: number;
+  /** Spaces before a record group that has a column heading. Default 3. */
+  heading: number;
+}
+
+/** Read the configured record-row indents (clamped to non-negative integers). */
+function getAlignIndents(resource?: vscode.Uri): AlignIndents {
+  const cfg = vscode.workspace.getConfiguration('opm-flow.formatting', resource ?? null);
+  const clamp = (n: number, fallback: number) =>
+    Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+  return {
+    record: clamp(cfg.get<number>('recordIndent', 2), 2),
+    heading: clamp(cfg.get<number>('headingIndent', 3), 3),
+  };
 }
 
 /** A diagnostic carrying the extra fields the quick-fix provider reads back
@@ -1722,7 +1746,8 @@ export function activate(context: vscode.ExtensionContext): void {
     // Existing comments around the group are ignored and never used as an
     // alignment anchor, so a descriptive comment above the table cannot be
     // mistaken for a column heading.
-    const { heading, formattedRecords } = buildHeadingAndAlignedRecords(group, names);
+    const { heading, formattedRecords } =
+      buildHeadingAndAlignedRecords(group, names, getAlignIndents(doc.uri).heading);
 
     // Idempotency: if the line directly above the group is a heading this
     // command previously generated (its words are exactly the column names),
@@ -1792,7 +1817,9 @@ export function activate(context: vscode.ExtensionContext): void {
       firstLine, 0, lastLine, editor.document.lineAt(lastLine).text.length,
     );
     const excludedKeywords = getAlignColumnsExcludedKeywords(editor.document.uri);
-    const edits = computeAlignEdits(editor.document, range, excludedKeywords);
+    const edits = computeAlignEdits(
+      editor.document, range, excludedKeywords, getAlignIndents(editor.document.uri),
+    );
     if (edits.length === 0) {
       vscode.window.showInformationMessage('OPM Flow: nothing to align in the current record');
       return;
@@ -1806,7 +1833,9 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!editor) return;
     const range = editor.selection.isEmpty ? undefined : editor.selection;
     const excludedKeywords = getAlignColumnsExcludedKeywords(editor.document.uri);
-    const edits = computeAlignEdits(editor.document, range, excludedKeywords);
+    const edits = computeAlignEdits(
+      editor.document, range, excludedKeywords, getAlignIndents(editor.document.uri),
+    );
     if (edits.length === 0) {
       vscode.window.showInformationMessage('OPM Flow: no record groups to align in the current file');
       return;
@@ -1826,6 +1855,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     const excludedKeywords = getAlignColumnsExcludedKeywords(rootUri, true);
+    const indents = getAlignIndents(rootUri);
     const deckFiles = collectDeckIncludeFiles(rootUri.fsPath, fsPath => {
       try {
         return fs.readFileSync(fsPath, 'utf8').split(/\r?\n/);
@@ -1844,7 +1874,7 @@ export function activate(context: vscode.ExtensionContext): void {
       } catch {
         continue;
       }
-      const fileEdits = computeAlignEdits(doc, undefined, excludedKeywords);
+      const fileEdits = computeAlignEdits(doc, undefined, excludedKeywords, indents);
       if (fileEdits.length > 0) { filesChanged++; }
       for (const e of fileEdits) {
         we.replace(uri, e.range, e.newText);
