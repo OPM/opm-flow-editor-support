@@ -13,6 +13,11 @@ be trimmed and reordered later.
 4. Recommended look: a dark theme, editor font ~16 px, zoom level +1
    (`Ctrl+=` once), minimap off, breadcrumbs on.
 5. Hide personal panels; keep the Explorer visible on the left.
+6. *(Only for Clip 6 — running the simulator.)* Install OPM Flow and point the
+   extension at it in Settings: set `opm-flow.simulator.executablePath`. On
+   Windows, enable `opm-flow.simulator.useWsl` and use the Linux path (e.g.
+   `/usr/bin/flow`), optionally setting `opm-flow.simulator.wslDistribution`.
+   Verify it works once off-camera so the first on-camera run is clean.
 
 Pacing tips: move the cursor deliberately, pause ~1 s on each tooltip so it is
 readable, and let folds/alignments settle before cutting.
@@ -45,13 +50,17 @@ readable, and let folds/alignments settle before cutting.
 
 - **Take 5 — Completion.** At the end of `SCHEDULE`, on a new line in column 1,
   type `WCON` — the keyword completion list appears with sections and one-line
-  summaries. Then inside a fresh `COMPDAT` record, at the STATUS column, trigger
-  completion to show the value list (`OPEN` / `SHUT` / `AUTO`). *(Undo any typing
-  before the next take with `Ctrl+Z`.)*
+  summaries. Accept `WCONPROD`: it inserts a **boilerplate record** as a
+  tab-navigable snippet (documented defaults / typed placeholders, terminated to
+  match the keyword's shape). `Tab` through a couple of placeholders to show they
+  overwrite cleanly. Then inside a fresh `COMPDAT` record, at the STATUS column,
+  trigger completion to show the value list (`OPEN` / `SHUT` / `AUTO`). *(Undo any
+  typing before the next take with `Ctrl+Z`.)*
 
 - **Take 6 — Align Record Columns.** Put the cursor inside the `SWOF` table (or
-  the `WELSPECS` block). Run **OPM Flow: Align Record Columns** from the Command
-  Palette (`Ctrl+Shift+P`). Columns snap into alignment. Show the before/after.
+  the `WELSPECS` block). Run **OPM Flow: Align Record Columns in Record** from the
+  Command Palette (`Ctrl+Shift+P`). Columns snap into alignment. Show the
+  before/after. *(Mention the companion **… in File** and **… in Deck** scopes.)*
 
 - **Take 7 — Add Column Headers.** With the cursor in the `COMPDAT` block, run
   **OPM Flow: Add Column Headers**. A `--` comment with parameter names is
@@ -83,6 +92,13 @@ camera, then `Ctrl+Z` each one back.
 - **Take 5 — Missing terminator.** Delete the trailing `/` on a `WELSPECS`
   record. Squiggle flags the missing per-record `/`.
 
+- **Take 6 — Quick Fixes.** Re-create one of the fixable mistakes above (e.g.
+  lowercase `compdat`, or an indented `WCONPROD`, or the missing `/`). Place the
+  cursor on the squiggle, open the lightbulb (`Ctrl+.`), and apply the offered
+  fix — **Convert to uppercase** / **Move keyword to column 1** / **Add
+  terminating `/`**. For an unknown keyword like `EQLDIM`, show the **Replace with
+  `EQLDIMS`** fix substituting the nearest known keyword.
+
 Undo everything so the file is clean for the next session.
 
 ---
@@ -93,7 +109,7 @@ Undo everything so the file is clean for the next session.
 
 - **Take 1 — UDQ alignment (`UDQ_WCONPROD.DATA`, `UDQ` block ~line 349).**
   Show the `UDQ` block with `DEFINE … / UNITS …` statements slightly ragged.
-  Run **OPM Flow: Align Record Columns**. The dedicated three-column layout
+  Run **OPM Flow: Align Record Columns in Record**. The dedicated three-column layout
   appears: control word and variable name left-aligned, expression right-aligned
   so every terminating `/` lines up. Point out that a `/` used as division inside
   an expression is **not** mistaken for the terminator.
@@ -150,8 +166,33 @@ Undo everything so the file is clean for the next session.
   record the group belongs to (e.g. `ISEG1`, `ISEG2`, …). Repeat in the
   `COMPSEGS` block (~line 479) to show it adapts per keyword.
 
-- **Take 4 — Align the segment table.** Run **Align Record Columns** on the
-  `WELSEGS` segment block to tidy the long numeric rows.
+- **Take 4 — Align the segment table.** Run **Align Record Columns in Record** on
+  the `WELSEGS` segment block to tidy the long numeric rows.
+
+---
+
+## Clip 6 — Verify & run the simulation (file `01-spe1-basics/SPE1CASE1.DATA`)
+
+**Goal:** show that you can check and run a deck with OPM Flow without leaving the
+editor. *(Requires the off-camera simulator setup — step 6 above.)* SPE1 is the
+small SPE benchmark case, so a full run finishes in seconds on camera.
+
+- **Take 1 — Verify Deck (dry run).** With `SPE1CASE1.DATA` open, run **OPM Flow:
+  Verify Deck (dry run)** from the right-click menu (or Command Palette). An
+  integrated terminal opens in the deck's folder and `flow` parses and
+  initializes the model in dry-run mode — no time steps. Point out this is the
+  fast check that the deck and everything it pulls in via `INCLUDE` / `PATHS`
+  loads cleanly. *(On Windows, note the path was translated to its `/mnt/...`
+  WSL mount automatically.)*
+
+- **Take 2 — Run Simulation.** Run **OPM Flow: Run Simulation**. The same
+  terminal streams the live solver output to completion. Let the report counters
+  tick to the end of the run.
+
+- **Take 3 — Open the PRT output.** Run **OPM Flow: Open PRT File** (or
+  `Ctrl+Alt+P`). The `SPE1CASE1.PRT` print file that the run just produced opens
+  next to the deck. Scroll briefly to show the run summary. *(Good closing shot —
+  "edit, verify, run, inspect, all in one place".)*
 
 ---
 
@@ -166,4 +207,6 @@ Undo everything so the file is clean for the next session.
 7. `Ctrl+click` INCLUDE jump (Clip 4 / Take 1).
 8. Well-name completion list (Clip 4 / Take 2).
 9. WELSEGS per-record headers (Clip 5 / Take 3).
-10. Close on Generate Keyword Reference (Clip 1 / Take 8).
+10. Verify Deck dry-run in the terminal (Clip 6 / Take 1).
+11. Run Simulation to completion → Open PRT File (Clip 6 / Takes 2–3).
+12. Close on Generate Keyword Reference (Clip 1 / Take 8).

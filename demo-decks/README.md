@@ -10,7 +10,7 @@ without any external files.
 
 | Folder | Deck | Feature focus |
 |--------|------|---------------|
-| `01-spe1-basics/`        | `SPE1CASE1.DATA`   | Highlighting, section/keyword folding, hover, diagnostics, completion, **Align Record Columns**, **Add Column Headers**, docs sidebar, Generate Keyword Reference |
+| `01-spe1-basics/`        | `SPE1CASE1.DATA`   | Highlighting, section/keyword folding, hover, diagnostics + quick fixes, completion (boilerplate snippets), **Align Record Columns**, **Add Column Headers**, docs sidebar, Generate Keyword Reference, **Verify Deck** / **Run Simulation** + **Open PRT File** |
 | `02-udq-actionx/`        | `UDQ_WCONPROD.DATA`, `ACTIONX_M1.DATA` | UDQ three-column alignment, UDQ/ACTIONX recognition + hover, value completion |
 | `03-includes-and-names/` | `TEST1_WS.DATA`    | `Ctrl+click` `INCLUDE` navigation, well/group-name completion from `WELSPECS`/`GRUPTREE` |
 | `04-msw-multirecord/`    | `MSW-SIMPLE.DATA`  | Multi-record keyword hover (`WELSEGS`/`COMPSEGS`), per-record **Add Column Headers**, `PATHS` alias navigation |

@@ -9,9 +9,27 @@ opm-flow-editor-support/
 │                            #   opm/input/eclipse/share/keywords)
 ├── scripts/                 # keyword-index builder (Python)
 │   ├── build_keyword_index.py
+│   ├── test_build_keyword_index.py   # pytest suite for the builder
 │   └── requirements.txt
+├── demo-decks/              # runnable sample decks + VIDEO-SCRIPT.md walkthrough
+├── examples/                # small decks illustrating single features
 └── vscode-extension/        # the VS Code extension
-    ├── src/extension.ts
+    ├── src/
+    │   ├── extension.ts          # activation, command + provider wiring
+    │   ├── analysis.ts           # deck parsing + diagnostics engine
+    │   ├── boilerplate.ts        # keyword-completion snippet bodies
+    │   ├── names.ts              # well/group name harvesting (WELSPECS/GRUPTREE)
+    │   ├── udq.ts                # UDQ / ACTIONX recognition + metadata
+    │   ├── formatting.ts         # Align Record Columns / Add Column Headers
+    │   ├── align-exclusions.ts   # keywords skipped by the deck-wide align sweep
+    │   ├── diagnostics-exclusions.ts
+    │   ├── keyword-supplement.ts # deck-name alias / family resolution
+    │   ├── links.ts              # INCLUDE/IMPORT/RESTART/GDFILE file links
+    │   ├── paths.ts              # PATHS alias expansion + path resolution
+    │   ├── outline.ts            # section/keyword tree view
+    │   ├── simulator.ts          # Verify Deck / Run Simulation (optional)
+    │   └── *.test.ts             # Jest unit tests, one per module
+    ├── scripts/sync-manual-ref.js    # stamps the manual commit into README
     ├── syntaxes/opm-flow.tmLanguage.json
     ├── language-configuration.json
     ├── data/keyword_index_compact.json
@@ -62,6 +80,14 @@ npm test               # all unit tests
 npx jest analysis      # a single suite
 ```
 
+The Python keyword-index builder has its own pytest suite:
+
+```sh
+cd scripts
+pip install -r requirements.txt
+python -m pytest test_build_keyword_index.py
+```
+
 ### Corpus false-positive harness
 
 `src/corpus.test.ts` runs the diagnostics engine over the
@@ -97,6 +123,18 @@ python build_keyword_index.py \
     --output ../keyword_index.json \
     --compact ../vscode-extension/data/keyword_index_compact.json
 ```
+
+Or run the wrapper from the extension, which writes the compact index in place:
+
+```sh
+cd vscode-extension
+npm run build-index
+```
+
+`vscode-extension/README.md` carries the manual commit it was built from inside a
+`<!-- manual-ref:start -->` marker. `npm run sync-manual-ref` (also part of
+`vscode:prepublish`) stamps the current `opm-reference-manual` submodule commit
+into that marker, so the listing always shows the data revision being shipped.
 
 ## Release
 

@@ -379,6 +379,12 @@ you can override them per-workspace or per-folder.
 | --- | --- | --- |
 | `opm-flow.additionalFileExtensions` | `[]` | Extra file extensions (with or without a leading `.`) to open as OPM Flow on top of the built-in list. Useful for project-specific include-file conventions. Matched case-insensitively. Example: `[".myinc", "wellconv"]`. For one-off cases the VS Code-native `files.associations` setting still works too. |
 
+### Formatting
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `opm-flow.formatting.alignColumnsExcludedKeywords` | `[]` | Extra keywords to skip when aligning record columns. Names are upper-cased on read; matching is case-insensitive. Honoured by all three [Align Record Columns](#align-record-columns) commands, and *added* to the built-in deck-sweep defaults (per-cell grid/region arrays like `PORO`/`PERMX`/`COORD` and large `VFPPROD`/`VFPINJ` tables, which **Align … in Deck** already skips). |
+
 ### Simulator
 
 Optional integration for the [Verify and Run](#verify-and-run-the-simulation-optional)
@@ -451,6 +457,20 @@ The language is registered as `opm-flow`.
 
 ### Unreleased
 
+- **Align Record Columns at three scopes** — the alignment command is now split
+  into **Align Record Columns in Record** (the group under the cursor), **… in
+  File** (the whole document, or the selection), and **… in Deck** (follows the
+  `INCLUDE` chain, resolving `PATHS` aliases, and aligns every reachable file,
+  reporting the line/file counts). The deck sweep skips per-cell grid/region
+  arrays (`PORO`, `PERMX`, `COORD`, …) and large `VFPPROD`/`VFPINJ` tables by
+  default so `INCLUDE`d fixed-width files are not rewritten; the new
+  `opm-flow.formatting.alignColumnsExcludedKeywords` setting adds further
+  keywords to skip (honoured by all three commands).
+- **Well / group name completion** — in a well- or group-name column (the
+  opm-common `WELL`/`GROUP` item family — `WCONPROD`, `WELOPEN`, `GCONPROD`,
+  `WEFAC`, …) the suggestion list offers the names the deck already declares:
+  well names from `WELSPECS`, and group names from `WELSPECS` and `GRUPTREE`,
+  gathered across the whole file.
 - **Verify and run the simulation (optional)** — new **OPM Flow: Verify Deck
   (dry run)** and **OPM Flow: Run Simulation** commands launch a locally
   installed `flow` binary on the open deck in an integrated terminal. Verify uses
