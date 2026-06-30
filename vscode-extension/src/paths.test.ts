@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { parsePathsAliases, resolvePathAlias, prtCandidatePaths } from './paths';
+import { parsePathsAliases, resolvePathAlias, prtCandidatePaths, collectDeckIncludeFiles } from './paths';
 
 // ---------------------------------------------------------------------------
 // parsePathsAliases
@@ -161,5 +161,108 @@ describe('issue #14 — INCLUDE path with PATHS alias', () => {
     // (e.g. eclipse/model/$INCLUDEPATH/grid/PERM.grdecl).
     expect(resolvePathAlias('$INCLUDEPATH/grid/PERM.grdecl', aliases))
       .toBe('../include/grid/PERM.grdecl');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectDeckIncludeFiles
+// ---------------------------------------------------------------------------
+
+describe('collectDeckIncludeFiles', () => {
+  // Build a mock readLines callback from a map of path -> lines
+  const makeReader = (files: Record<string, string[]>) =>
+    (fsPath: string): string[] | null => files[fsPath] ?? null;
+
+  const root = path.resolve('/deck/CASE.DATA');
+  const inc1 = path.resolve('/deck/include/GRID.INC');
+  const inc2 = path.resolve('/deck/include/PROPS.INC');
+
+  it('returns only the root file when it has no INCLUDE statements', () => {
+    const reader = makeReader({ [root]: ['RUNSPEC', 'GRID'] });
+    expect(collectDeckIncludeFiles(root, reader)).toEqual([root]);
+  });
+
+  it('returns root followed by one included file', () => {
+    const reader = makeReader({
+      [root]: ['GRID', 'INCLUDE', " 'include/GRID.INC' /"],
+      [inc1]: ['PORO', ' 1 2 3 /'],
+    });
+    expect(collectDeckIncludeFiles(root, reader)).toEqual([root, inc1]);
+  });
+
+  it('returns root followed by multiple included files in order', () => {
+    const reader = makeReader({
+      [root]: [
+        'GRID',
+        'INCLUDE',
+        " 'include/GRID.INC' /",
+        'PROPS',
+        'INCLUDE',
+        " 'include/PROPS.INC' /",
+      ],
+      [inc1]: ['PORO', ' 1 2 3 /'],
+      [inc2]: ['PVTW', ' 1 2 3 4 5 /'],
+    });
+    expect(collectDeckIncludeFiles(root, reader)).toEqual([root, inc1, inc2]);
+  });
+
+  it('follows nested INCLUDE chains', () => {
+    const inc3 = path.resolve('/deck/include/nested/PERM.INC');
+    const reader = makeReader({
+      [root]: ['GRID', 'INCLUDE', " 'include/GRID.INC' /"],
+      [inc1]: ['INCLUDE', " 'nested/PERM.INC' /"],
+      [inc3]: ['PERMX', ' 1 2 3 /'],
+    });
+    expect(collectDeckIncludeFiles(root, reader)).toEqual([root, inc1, inc3]);
+  });
+
+  it('does not visit the same file twice (cycle protection)', () => {
+    // inc1 includes root, which would create an infinite loop without cycle protection
+    const reader = makeReader({
+      [root]: ['GRID', 'INCLUDE', " 'include/GRID.INC' /"],
+      [inc1]: ['INCLUDE', " '../CASE.DATA' /"],
+    });
+    expect(collectDeckIncludeFiles(root, reader)).toEqual([root, inc1]);
+  });
+
+  it('does not follow IMPORT or RESTART references', () => {
+    const reader = makeReader({
+      [root]: [
+        'GRID',
+        'IMPORT',
+        " 'include/GRID.INC' /",
+        'RESTART',
+        " 'include/PROPS.INC' 1 /",
+      ],
+      [inc1]: ['PORO', ' 1 2 3 /'],
+      [inc2]: ['PVTW', ' 1 2 3 4 5 /'],
+    });
+    // IMPORT and RESTART are not included
+    expect(collectDeckIncludeFiles(root, reader)).toEqual([root]);
+  });
+
+  it('gracefully skips files that cannot be read', () => {
+    const reader = makeReader({
+      [root]: ['GRID', 'INCLUDE', " 'include/MISSING.INC' /"],
+      // MISSING.INC not in the map → readLines returns null
+    });
+    const missing = path.resolve('/deck/include/MISSING.INC');
+    // The missing file is included in the list but has no children
+    expect(collectDeckIncludeFiles(root, reader)).toEqual([root, missing]);
+  });
+
+  it('resolves PATHS aliases in INCLUDE paths', () => {
+    const inc4 = path.resolve('/deck/data/GRID.INC');
+    const reader = makeReader({
+      [root]: [
+        'PATHS',
+        " 'DATA' 'data' /",
+        '/',
+        'INCLUDE',
+        " '$DATA/GRID.INC' /",
+      ],
+      [inc4]: ['PORO', ' 1 /'],
+    });
+    expect(collectDeckIncludeFiles(root, reader)).toEqual([root, inc4]);
   });
 });

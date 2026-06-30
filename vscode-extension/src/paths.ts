@@ -16,6 +16,7 @@
 // ---------------------------------------------------------------------------
 
 import * as path from 'path';
+import { findFileReferences } from './links';
 
 /**
  * Candidate `.PRT` print-file paths for a deck file, most-preferred first.
@@ -86,4 +87,43 @@ export function resolvePathAlias(
   const expansion = aliases.get(name);
   if (expansion === undefined) return rawPath;
   return expansion + rawPath.slice(m[0].length);
+}
+
+/**
+ * Collect the absolute paths of all files reachable from a root deck file
+ * by following INCLUDE references, recursively. The root file itself is
+ * always the first entry. Files are visited at most once (cycles are broken).
+ *
+ * `readLines` is a callback that returns the lines of a file given its
+ * absolute path, or `null` when the file cannot be read. This indirection
+ * keeps the function free of filesystem imports so it can be unit-tested.
+ *
+ * Only INCLUDE references are followed; IMPORT / RESTART / GDFILE are not
+ * include-file chains and are left alone.
+ */
+export function collectDeckIncludeFiles(
+  rootFsPath: string,
+  readLines: (fsPath: string) => string[] | null,
+  visited: Set<string> = new Set(),
+): string[] {
+  if (visited.has(rootFsPath)) return [];
+  visited.add(rootFsPath);
+
+  const results: string[] = [rootFsPath];
+  const lines = readLines(rootFsPath);
+  if (!lines) return results;
+
+  const aliases = parsePathsAliases(lines);
+  const refs = findFileReferences(lines);
+  const dir = path.dirname(rootFsPath);
+
+  for (const ref of refs) {
+    if (ref.keyword !== 'INCLUDE') continue;
+    const resolved = resolvePathAlias(ref.rawPath, aliases);
+    const absPath = path.resolve(dir, resolved);
+    const sub = collectDeckIncludeFiles(absPath, readLines, visited);
+    results.push(...sub);
+  }
+
+  return results;
 }

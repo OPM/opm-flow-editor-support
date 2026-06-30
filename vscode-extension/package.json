@@ -131,8 +131,16 @@
         "title": "OPM Flow: Generate Keyword Reference"
       },
       {
+        "command": "opm-flow.alignRecordColumnsRecord",
+        "title": "OPM Flow: Align Record Columns in Record"
+      },
+      {
         "command": "opm-flow.alignRecordColumns",
-        "title": "OPM Flow: Align Record Columns"
+        "title": "OPM Flow: Align Record Columns in File"
+      },
+      {
+        "command": "opm-flow.alignRecordColumnsInDeck",
+        "title": "OPM Flow: Align Record Columns in Deck"
       },
       {
         "command": "opm-flow.addColumnHeaders",
@@ -158,19 +166,29 @@
     "menus": {
       "editor/context": [
         {
-          "command": "opm-flow.alignRecordColumns",
+          "command": "opm-flow.alignRecordColumnsRecord",
           "when": "resourceLangId == opm-flow",
           "group": "opmflow_1_format@1"
         },
         {
-          "command": "opm-flow.addColumnHeaders",
+          "command": "opm-flow.alignRecordColumns",
           "when": "resourceLangId == opm-flow",
           "group": "opmflow_1_format@2"
         },
         {
-          "command": "opm-flow.toggleLineComment",
+          "command": "opm-flow.alignRecordColumnsInDeck",
           "when": "resourceLangId == opm-flow",
           "group": "opmflow_1_format@3"
+        },
+        {
+          "command": "opm-flow.addColumnHeaders",
+          "when": "resourceLangId == opm-flow",
+          "group": "opmflow_1_format@4"
+        },
+        {
+          "command": "opm-flow.toggleLineComment",
+          "when": "resourceLangId == opm-flow",
+          "group": "opmflow_1_format@5"
         },
         {
           "command": "opm-flow.openPrtFile",
@@ -321,6 +339,15 @@
           },
           "default": [],
           "markdownDescription": "Extra arguments passed to flow by **Run Simulation** (e.g. `--output-dir=...`, `--threads-per-process=4`). The deck file is supplied automatically.",
+          "scope": "resource"
+        },
+        "opm-flow.formatting.alignColumnsExcludedKeywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra keywords whose record tables are skipped by the Align Record Columns commands. Names are matched case-insensitively. The whole-deck command additionally skips a built-in set of per-cell grid/region/solution arrays (PORO, PERMX, COORD, SATNUM, …) and large tables (VFPPROD/VFPINJ) so INCLUDE'd grid files keep their fixed-width layout; the keywords listed here are added to that set. The in-Record and in-File commands apply only the keywords listed here.",
           "scope": "resource"
         }
       }
