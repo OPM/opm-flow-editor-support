@@ -66,7 +66,8 @@ export const SUPPLEMENTAL_KEYWORDS: AnalysisIndex = {
 export function applyKeywordSupplement(index: AnalysisIndex): AnalysisIndex {
   for (const name in SUPPLEMENTAL_KEYWORDS) {
     if (index[name] === undefined) {
-      index[name] = SUPPLEMENTAL_KEYWORDS[name] as AnalysisEntry;
+      const entry = SUPPLEMENTAL_KEYWORDS[name] as AnalysisEntry;
+      index[name] = { sections: [], ...entry };
     }
   }
   return index;
