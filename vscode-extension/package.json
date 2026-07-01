@@ -37,6 +37,15 @@
   ],
   "main": "./out/extension",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "opm-flow-keywordReferenceContainer",
+          "title": "OPM Keyword Reference",
+          "icon": "media/opm-logo-mono.svg"
+        }
+      ]
+    },
     "views": {
       "explorer": [
         {
@@ -44,7 +53,9 @@
           "id": "opm-flow.outlineView",
           "name": "OPM Flow Outline",
           "when": "resourceLangId == opm-flow"
-        },
+        }
+      ],
+      "opm-flow-keywordReferenceContainer": [
         {
           "type": "webview",
           "id": "opm-flow.docsView",
