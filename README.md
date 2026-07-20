@@ -73,7 +73,7 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
   missing closing `/` on record-list and cell-property-array blocks,
   keywords not starting in column 1, and keywords typed in non-uppercase
   form — both of which OPM Flow itself silently fails to recognise.
-- **Docs sidebar panel** that follows the cursor — full documentation for the
+- **Docs panel** that follows the cursor — full documentation for the
   keyword under the cursor, with the active parameter row highlighted.
   Multi-record keywords are rendered as one parameter table per record
   with a heading per record.

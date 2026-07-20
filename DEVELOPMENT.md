@@ -39,7 +39,7 @@ opm-flow-editor-support/
 The two upstream sources are merged into a single index: `opm-reference-manual`
 provides descriptions, units, and examples; `opm-common` provides authoritative
 section validity and per-parameter `value_type` (INT/DOUBLE/STRING/…) and
-`dimension` (Length/Pressure/…) — both surfaced in hover and the docs sidebar.
+`dimension` (Length/Pressure/…) — both surfaced in hover and the docs panel.
 
 ## Clone
 
