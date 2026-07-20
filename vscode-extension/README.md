@@ -485,11 +485,25 @@ The language is registered as `opm-flow`.
   default so `INCLUDE`d fixed-width files are not rewritten; the new
   `opm-flow.formatting.alignColumnsExcludedKeywords` setting adds further
   keywords to skip (honoured by all three commands).
+- **Alignment indent and heading handling** — the indent applied to record rows
+  and to heading comments is now configurable via
+  `opm-flow.formatting.recordIndent` and `opm-flow.formatting.headingIndent`.
+  A group preceded by a `--` column-heading comment aligns to that heading's
+  columns rather than to the data alone, and single-row tables are aligned
+  instead of left as written.
+- **Keyword completion no longer returns an empty list** — ten curated
+  supplemental keywords (`STORE`, `AIM`, `CVTYPE`, `AMF`, …) were merged into
+  the runtime index without a `sections` array, and call sites that read it
+  unconditionally threw part-way through building the suggestion list. Hitting
+  any of them aborted the whole list, so keyword completion silently offered
+  nothing.
 - **Well / group name completion** — in a well- or group-name column (the
   opm-common `WELL`/`GROUP` item family — `WCONPROD`, `WELOPEN`, `GCONPROD`,
   `WEFAC`, …) the suggestion list offers the names the deck already declares:
   well names from `WELSPECS`, and group names from `WELSPECS` and `GRUPTREE`,
-  gathered across the whole file.
+  gathered across the whole file. Each suggestion follows the quote style the
+  name was declared with — a name written `'P1'` is offered quoted, a bare name
+  unquoted — and the list is sorted naturally, so `W2` precedes `W10`.
 - **Verify and run the simulation (optional)** — new **OPM Flow: Verify Deck
   (dry run)** and **OPM Flow: Run Simulation** commands launch a locally
   installed `flow` binary on the open deck in an integrated terminal. Verify uses
