@@ -2,10 +2,28 @@
 // Corpus false-positive harness.
 //
 // The OPM/opm-tests repository (https://github.com/OPM/opm-tests) is a large
-// collection of *known-good* OPM Flow decks — every deck there parses and runs
-// in OPM Flow. That makes it an ideal false-positive guard: any diagnostic this
-// extension emits on those decks is a suspect — an analyzer bug, a keyword/shape
-// the index is missing, or a keyword that belongs on the exclusion list.
+// collection of OPM Flow decks that are *mostly* known-good. That makes it a
+// useful false-positive guard: a diagnostic this extension emits on those decks
+// is a suspect — an analyzer bug, a keyword/shape the index is missing, or a
+// keyword that belongs on the exclusion list.
+//
+// A suspect, not a verdict. The corpus is not all-good, and treating it as
+// such leads to suppressing correct warnings. Confirmed counter-example:
+//
+//   spe1/SPE1CASE2_AQUFET.DATA writes AQUFET with no standalone '/'. AQUFET
+//   declares items and no size, so opm-common classifies it SLASH_TERMINATED,
+//   and RawKeyword::can_complete() is false for that size type — meaning the
+//   next keyword does NOT end it. The parser swallows SUMMARY, FOPR, WGOR and
+//   'PROD' as records and dies with "Malformed floating point number
+//   'SUMMARY'". The deck does not load at all. Reported as OPM/opm-tests#1548.
+//
+// So before "fixing" an entry here, verify against the real thing — read the
+// parser in opm-common, or run the deck:
+//
+//   flow <deck> --enable-dry-run=true
+//
+// Domain reasoning about what a keyword ought to mean is not sufficient; what
+// the parser does is what decides whether a deck loads.
 //
 // This harness walks the corpus, runs `computeDiagnostics` on every text input
 // file, aggregates the warnings by diagnostic *type* and *keyword*, and writes a
@@ -160,8 +178,14 @@ describeCorpus('opm-tests corpus false-positive harness', () => {
     md.push(`- Files with at least one diagnostic: **${byFile.size}**`);
     md.push(`- Total diagnostics (suspected false positives): **${totalDiagnostics}**`);
     md.push('');
-    md.push('All decks here are known-good, so every diagnostic below is a suspect:');
+    md.push('Most decks here are known-good, so a diagnostic below is a suspect:');
     md.push('an analyzer bug, a missing index keyword/shape, or an exclusion candidate.');
+    md.push('');
+    md.push('**A suspect, not a verdict.** The corpus is not all-good. Verify against');
+    md.push('the parser (opm-common) or run `flow <deck> --enable-dry-run=true` before');
+    md.push('treating an entry as a false positive — `AQUFET` in');
+    md.push('`spe1/SPE1CASE2_AQUFET.DATA` is a real defect that stops the deck loading');
+    md.push('(OPM/opm-tests#1548), not noise.');
     md.push('');
 
     md.push('## By diagnostic type');
