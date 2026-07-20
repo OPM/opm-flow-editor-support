@@ -80,15 +80,6 @@ DIRECTIONAL_SUFFIXES = ("X", "Y", "Z")
 # Tag these explicitly so per-line missing-'/' diagnostics are suppressed.
 VARIADIC_RECORD_KEYWORDS = frozenset({"MESSAGES", "VFPPROD", "VFPINJ"})
 
-# Multi-record keywords whose block ends with the trailing record's '/'
-# rather than a separate standalone '/'. opm-common classifies them as
-# 'list' (size = None/string sentinel) but real decks never close them
-# with a standalone '/' — the next keyword is what ends the block.
-# Reclassified to 'fixed' (size_count = records_meta.length) so the
-# diagnostics engine doesn't demand a closing terminator.
-NO_LIST_TERMINATOR_KEYWORDS = frozenset({"VFPPROD", "VFPINJ"})
-
-
 def _has_variable_arity_item(opm_items: list[dict]) -> bool:
     """
     True when any item declares ``size_type: "ALL"`` — those items consume
@@ -1676,23 +1667,6 @@ def build_index(manual_dir: Path) -> dict:
         targets = entry if isinstance(entry, list) else [entry]
         for e in targets:
             e["variadic_record"] = True
-
-    # Reclassify list-kind keywords that don't end with a standalone '/'
-    # as 'fixed' (size_count = records_meta length) so closeKw doesn't
-    # demand a final terminator. VFPPROD/VFPINJ: the trailing variadic
-    # record's '/' is the natural end of the block.
-    for name in NO_LIST_TERMINATOR_KEYWORDS:
-        entry = index.get(name)
-        if entry is None:
-            continue
-        targets = entry if isinstance(entry, list) else [entry]
-        for e in targets:
-            if e.get("size_kind") != "list":
-                continue
-            records_meta = e.get("records_meta")
-            if records_meta:
-                e["size_kind"] = "fixed"
-                e["size_count"] = len(records_meta)
 
     # UDQ SUMMARY mnemonics are documented under placeholder names of the
     # form ``<scope-prefix>UX{2,}`` (FUXXXXXX, WUXXXXXX, …) — the trailing
