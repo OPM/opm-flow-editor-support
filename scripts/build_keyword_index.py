@@ -649,7 +649,11 @@ def add_directional_variants(index: dict) -> int:
     entry with its name updated. Returns the number of variants added.
     """
     added = 0
-    for base in DIRECTIONAL_VARIANT_BASES:
+    # sorted(): iterating the frozenset directly leaves the order of the
+    # generated KRNUMX/IMBNUMX-style entries at the mercy of Python's
+    # per-process string hash randomisation, so two builds of identical
+    # inputs emit the index with those keys in different positions.
+    for base in sorted(DIRECTIONAL_VARIANT_BASES):
         base_entry = index.get(base)
         if not base_entry:
             continue
@@ -1650,7 +1654,7 @@ def build_index(manual_dir: Path) -> dict:
 
     # Mark known template keywords (TVDP, …) so the diagnostics engine and
     # docs/hover providers accept ``<base><suffix>`` deck tokens.
-    for name in TEMPLATE_KEYWORD_NAMES:
+    for name in sorted(TEMPLATE_KEYWORD_NAMES):
         entry = index.get(name)
         if entry is None:
             continue
@@ -1660,7 +1664,7 @@ def build_index(manual_dir: Path) -> dict:
 
     # Mark keywords whose single record canonically spans multiple lines
     # so per-line missing-'/' diagnostics are suppressed (MESSAGES, …).
-    for name in VARIADIC_RECORD_KEYWORDS:
+    for name in sorted(VARIADIC_RECORD_KEYWORDS):
         entry = index.get(name)
         if entry is None:
             continue
