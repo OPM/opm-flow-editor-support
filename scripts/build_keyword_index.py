@@ -114,7 +114,9 @@ def _classify_size(opm_data: dict) -> tuple[str, Optional[int]]:
                given as a dict ``{keyword: X, item: Y}`` is also "fixed":
                the count comes from another keyword (e.g. RSVD takes
                ``EQLDIMS:NTEQUL`` records) but the deck still has no list
-               terminator after the last record.
+               terminator after the last record. The ``"SPECIAL_CASE_ROCK"``
+               sentinel (ROCK) has the same shape: NTPVT-many records with
+               no terminator.
     - "list":  unbounded record list. Each record terminates with '/' and
                the block itself terminates with a standalone '/'. Used for
                ``size`` as a string sentinel (e.g. "UNKNOWN" on VFPPROD),
@@ -147,6 +149,12 @@ def _classify_size(opm_data: dict) -> tuple[str, Optional[int]]:
     if isinstance(size, int) and size >= 1:
         return "fixed", size
     if isinstance(size, dict):
+        return "fixed", None
+    # ROCK carries the sentinel size "SPECIAL_CASE_ROCK": its record count is
+    # NTPVT (TABDIMS item 2), or NTSFUN/NTROCC when ROCKOPTS precedes it. That
+    # is dependent-count like the dict form above — a fixed block with no
+    # standalone '/' after the last record — not an unbounded list.
+    if size == "SPECIAL_CASE_ROCK":
         return "fixed", None
     if isinstance(size, str):
         return "list", None
