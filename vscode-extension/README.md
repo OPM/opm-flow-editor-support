@@ -470,7 +470,7 @@ The language is registered as `opm-flow`.
 
 ## Release Notes
 
-### Unreleased
+### 0.9.0
 
 - **Keyword reference moved to the bottom panel** — the **OPM Keyword Reference**
   webview now opens as a tab in the bottom panel (`Ctrl+J`) instead of its own
@@ -527,6 +527,14 @@ The language is registered as `opm-flow`.
 - **Fewer false positives on valid decks** — broadened keyword recognition and
   relaxed terminator rules, validated against the
   [OPM/opm-tests](https://github.com/OPM/opm-tests) corpus:
+  - `ROCK` is no longer reported as missing a list terminator. opm-common
+    gives it the sentinel size `SPECIAL_CASE_ROCK`, which was classified as an
+    unbounded list and so demanded a standalone `/` that no deck writes — the
+    warning fired on roughly a quarter of the corpus.
+  - `TEMPVD` is accepted in `SOLUTION`, and without a standalone `/`.
+    opm-common defines it in two dialects, and only the narrower Eclipse100
+    definition was kept, dropping both the `SOLUTION` section and the
+    `EQLDIMS`-dependent record count.
   - More SUMMARY vectors are recognised rather than flagged as unknown
     keywords: PROBE `deck_name`s, directional `KRNUM`/`IMBNUM` region variants,
     L-modifier vectors (`WOPRL`, `LWWIR`), FIP region-set vectors (`ROIP_ABC`),
