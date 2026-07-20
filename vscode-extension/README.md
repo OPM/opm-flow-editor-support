@@ -174,9 +174,9 @@ lightbulb, and apply:
 - **Replace with `<nearest>`** — for an unrecognised keyword that is a close typo
   of a known one (e.g. `EQLDIM` → `EQLDIMS`), substitute the suggested keyword.
 
-### Docs Panel (Sidebar)
+### Docs Panel
 
-Open the **Explorer** sidebar (`Ctrl+Shift+E`) and scroll down to the **OPM Keyword Reference** panel.
+Open the bottom panel (`Ctrl+J`) and select the **OPM Keyword Reference** tab.
 It updates automatically as you move the cursor — no keystrokes needed:
 
 - **Cursor on a keyword** → full documentation: valid sections, summary, complete parameter table, example
@@ -186,6 +186,8 @@ It updates automatically as you move the cursor — no keystrokes needed:
 The panel shows the keyword name, the section(s) it applies to, the summary,
 the parameter table, and the example. This is the main view for reading long
 keyword documentation, since it scrolls freely and stays visible while you edit.
+If you prefer it alongside the editor rather than beneath it, drag the tab into
+the primary or secondary sidebar — VS Code remembers the placement.
 
 By default each parameter's **Type, units, and Default** are folded into a
 compact muted sub-line beneath its description (the **embedded** layout). This
@@ -422,14 +424,14 @@ commands. Leave `executablePath` unset to keep the feature dormant.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `opm-flow.docs.layout` | `"embedded"` | How the docs sidebar and hover tooltips lay out parameter metadata. `"embedded"` folds Type, units, and Default into a compact sub-line beneath each description (more room for the description); `"columns"` renders them as separate table columns (the original layout). The show/hide settings below apply in either layout. |
+| `opm-flow.docs.layout` | `"embedded"` | How the docs panel and hover tooltips lay out parameter metadata. `"embedded"` folds Type, units, and Default into a compact sub-line beneath each description (more room for the description); `"columns"` renders them as separate table columns (the original layout). The show/hide settings below apply in either layout. |
 
-### Docs sidebar and hover columns
+### Docs panel and hover columns
 
 These toggles control which Type, unit, and Default values appear in the keyword
-docs sidebar and hover tooltips — as columns in the `columns` layout, or as bits
+docs panel and hover tooltips — as columns in the `columns` layout, or as bits
 of the metadata sub-line in the `embedded` layout. Disabling unused values gives
-the description more horizontal room in narrow side panels.
+the description more horizontal room when the view is docked somewhere narrow.
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -470,6 +472,10 @@ The language is registered as `opm-flow`.
 
 ### Unreleased
 
+- **Keyword reference moved to the bottom panel** — the **OPM Keyword Reference**
+  webview now opens as a tab in the bottom panel (`Ctrl+J`) instead of its own
+  activity bar container. Drag the tab into either sidebar if you prefer it
+  beside the editor; VS Code remembers the placement.
 - **Align Record Columns at three scopes** — the alignment command is now split
   into **Align Record Columns in Record** (the group under the cursor), **… in
   File** (the whole document, or the selection), and **… in Deck** (follows the
