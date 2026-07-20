@@ -781,6 +781,15 @@ class TestClassifySize:
         opm = {"size": "UNKNOWN", "items": [{"name": "DATA"}]}
         assert _classify_size(opm) == ("list", None)
 
+    def test_special_case_rock_is_fixed(self):
+        # ROCK's size is the sentinel "SPECIAL_CASE_ROCK", but the record
+        # count is NTPVT (or NTSFUN/NTROCC under ROCKOPTS) — dependent-count,
+        # like the dict form. Classifying it as "list" made the diagnostics
+        # demand a standalone '/' that no real deck writes, flagging the
+        # canonical SPE1 `ROCK\n 14.7 3E-6 /` as missing a terminator.
+        opm = {"size": "SPECIAL_CASE_ROCK", "items": [{"name": "PREF"}]}
+        assert _classify_size(opm) == ("fixed", None)
+
     def test_records_with_int_size_is_fixed_count(self):
         # TUNING-style: a fixed multi-record keyword (size=3, 3 records).
         # These do NOT close with a standalone '/'; size_kind must be
