@@ -1829,17 +1829,9 @@ describe('computeDiagnostics — quick-fix codes', () => {
     expect(d).toBeDefined();
   });
 
-  it('accepts a ROCK block with no standalone closing /', () => {
-    // ROCK takes NTPVT records and no list terminator, so the canonical
-    // SPE1 form below is legal. opm-common gives it the sentinel size
-    // "SPECIAL_CASE_ROCK", which used to classify as list-kind and made
-    // this deck report a missing terminator.
-    const diags = computeDiagnostics(
-      ['PROPS', 'ROCK', '\t14.7 3E-6 /', 'SWOF'],
-      index,
-    );
-    expect(diags.find(x => x.code === 'missing-list-terminator')).toBeUndefined();
-  });
+  // ROCK and TEMPVD shape regressions live in keyword-shape.test.ts: they
+  // need the shipped index, since a keyword absent from this fixture emits
+  // no shape diagnostics and would pass for the wrong reason.
 
   it('tags an array block missing its closing /', () => {
     const diags = computeDiagnostics(['GRID', 'PORO', '0.1 0.2 0.3', 'NTG'], index);

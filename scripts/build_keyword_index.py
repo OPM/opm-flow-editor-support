@@ -225,18 +225,72 @@ def _load_keyword_json(kw_file: Path) -> Optional[dict]:
         return json.loads(_sanitize_lax_json(text))
 
 
+def _merge_dialects(name: str, entry: dict, kept: dict, other: dict) -> None:
+    """
+    Fold a later dialect's definition of a keyword into the entry built from
+    the first one, in place.
+
+    Two rules, both aimed at not under-reporting what a deck may legally
+    contain:
+
+    * **Sections are unioned.** A keyword accepted in a section by any
+      dialect is legal there, so dropping a section only produces false
+      "not valid in X" warnings.
+    * **The shape comes from whichever definition carries an explicit
+      ``size``.** A definition with ``size`` states its record count (a
+      literal, or a dict naming another keyword's item); one without it
+      falls back to the ``items``-only branch of ``_classify_size``, which
+      yields list-kind and so demands a standalone '/'. TEMPVD is the case
+      in point: Eclipse300 gives ``{EQLDIMS: NTEQUL}`` with a single
+      ``size_type: ALL`` data item — the same shape as its neighbour RSVD,
+      and the shape real decks are written in — while Eclipse100 gives two
+      scalar items and no size.
+
+    Where both or neither declare a ``size``, the first dialect's shape
+    stands.
+    """
+    merged = list(entry.get("sections") or [])
+    for s in other.get("sections", []):
+        if s not in merged:
+            merged.append(s)
+    entry["sections"] = merged
+
+    # RAW_TEXT_KEYWORDS are pinned to size_kind "none" by the caller because
+    # their bodies are free text, not records; never let a dialect's declared
+    # size re-impose a record shape on them.
+    if "size" in other and "size" not in kept and name not in RAW_TEXT_KEYWORDS:
+        size_kind, size_count = _classify_size(other)
+        entry["items"] = other.get("items", [])
+        entry["records"] = other.get("records")
+        entry["size_kind"] = size_kind
+        entry["size_count"] = size_count
+
+
 def load_opm_common_index(keywords_dir: Path) -> dict:
     """
     Walk the opm-common keywords tree and return a dict keyed by keyword name.
 
     Each value: ``{"sections": [...], "items": [...], "size_kind": str,
-    "size_count": int|None}``. If a keyword appears in multiple dialect
-    dirs (uncommon in practice), the first one wins.
+    "size_count": int|None}``.
+
+    A keyword defined in more than one dialect dir is merged rather than
+    resolved first-wins, because the dialects disagree in ways that matter.
+    TEMPVD — currently the only such keyword — is declared PROPS-only with
+    two scalar items under Eclipse100, and PROPS+SOLUTION with an
+    ``EQLDIMS:NTEQUL`` size and one ``size_type: ALL`` data item under
+    Eclipse300. Taking Eclipse100 alone lost the SOLUTION section and the
+    dependent record count, so legal SOLUTION blocks were flagged both as
+    wrong-section and as missing a list terminator. See ``_merge_dialects``
+    for the rule.
     """
     if not keywords_dir.exists():
         sys.exit(f"ERROR: opm-common keywords dir not found: {keywords_dir}")
 
     out: dict[str, dict] = {}
+    # Raw JSON of the dialect that first defined each keyword, so
+    # _merge_dialects can compare shapes rather than guess from the
+    # already-classified entry.
+    raw: dict[str, dict] = {}
     total = 0
     for dialect in OPM_COMMON_DIALECTS:
         dialect_dir = keywords_dir / dialect
@@ -255,7 +309,9 @@ def load_opm_common_index(keywords_dir: Path) -> dict:
                     continue
                 name = data.get("name") or kw_file.name
                 if name in out:
+                    _merge_dialects(name, out[name], raw[name], data)
                     continue
+                raw[name] = data
                 size_kind, size_count = _classify_size(data)
                 if name in RAW_TEXT_KEYWORDS:
                     size_kind, size_count = "none", None

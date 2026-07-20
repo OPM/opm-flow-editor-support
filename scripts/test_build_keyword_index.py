@@ -41,6 +41,8 @@ from build_keyword_index import (
     attach_string_options,
     _opm_item_for_param,
     _classify_size,
+    _merge_dialects,
+    RAW_TEXT_KEYWORDS,
     _sanitize_lax_json,
     _load_keyword_json,
     _summary_size_shape,
@@ -642,14 +644,35 @@ class TestLoadOpmCommonIndex:
         assert idx["WELSPECS"]["items"][0]["value_type"] == "STRING"
         assert "MULTREGT" in idx
 
-    def test_first_dialect_wins_on_duplicate(self, tmp_path):
+    def test_duplicate_dialects_union_their_sections(self, tmp_path):
+        # Sections are unioned in dialect-iteration order rather than
+        # resolved first-wins: a keyword any dialect accepts in a section is
+        # legal there, and dropping one only yields false "not valid in X"
+        # warnings. This is TEMPVD's case (PROPS under Eclipse100,
+        # PROPS+SOLUTION under Eclipse300).
         for dialect, value in [("000_Eclipse100", "E100"), ("900_OPM", "OPM")]:
             self._write_kw(tmp_path, dialect, "X", "XYZ", {
                 "name": "XYZ", "sections": [value], "items": [],
             })
         idx = load_opm_common_index(tmp_path)
-        # E100 is iterated first, so it wins
-        assert idx["XYZ"]["sections"] == ["E100"]
+        assert idx["XYZ"]["sections"] == ["E100", "OPM"]
+
+    def test_duplicate_dialect_supplies_missing_size(self, tmp_path):
+        # The dialect carrying an explicit size states the record count; the
+        # one without falls back to items-only (list-kind), which demands a
+        # standalone '/'. The sized shape wins.
+        self._write_kw(tmp_path, "000_Eclipse100", "X", "XYZ", {
+            "name": "XYZ", "sections": ["PROPS"], "items": [{"name": "DEPTH"}],
+        })
+        self._write_kw(tmp_path, "001_Eclipse300", "X", "XYZ", {
+            "name": "XYZ", "sections": ["PROPS", "SOLUTION"],
+            "size": {"keyword": "EQLDIMS", "item": "NTEQUL"},
+            "items": [{"name": "DATA", "size_type": "ALL"}],
+        })
+        idx = load_opm_common_index(tmp_path)
+        assert idx["XYZ"]["sections"] == ["PROPS", "SOLUTION"]
+        assert idx["XYZ"]["size_kind"] == "fixed"
+        assert idx["XYZ"]["items"][0]["name"] == "DATA"
 
     def test_invalid_json_is_skipped(self, tmp_path):
         d = tmp_path / "000_Eclipse100" / "B"
@@ -780,6 +803,52 @@ class TestClassifySize:
         # VFPPROD-style: size: "UNKNOWN" — record count is genuinely unbounded.
         opm = {"size": "UNKNOWN", "items": [{"name": "DATA"}]}
         assert _classify_size(opm) == ("list", None)
+
+    def test_merge_dialects_unions_sections(self):
+        # TEMPVD: PROPS under Eclipse100, PROPS+SOLUTION under Eclipse300.
+        # Keeping only the first dialect flagged legal SOLUTION blocks as
+        # "not valid in SOLUTION".
+        entry = {"sections": ["PROPS"], "items": [], "records": None,
+                 "size_kind": "list", "size_count": None}
+        kept = {"sections": ["PROPS"], "items": [{"name": "DEPTH"}]}
+        other = {"sections": ["PROPS", "SOLUTION"], "items": [{"name": "DATA"}]}
+        _merge_dialects("TEMPVD", entry, kept, other)
+        assert entry["sections"] == ["PROPS", "SOLUTION"]
+
+    def test_merge_dialects_prefers_shape_with_explicit_size(self):
+        # The dialect declaring a size states its record count; the one
+        # without falls back to items-only, i.e. list-kind, which demands a
+        # standalone '/' that TEMPVD blocks never write.
+        entry = {"sections": ["PROPS"], "items": [{"name": "DEPTH"}],
+                 "records": None, "size_kind": "list", "size_count": None}
+        kept = {"sections": ["PROPS"], "items": [{"name": "DEPTH"}]}
+        other = {
+            "sections": ["PROPS"],
+            "size": {"keyword": "EQLDIMS", "item": "NTEQUL"},
+            "items": [{"name": "DATA", "size_type": "ALL"}],
+        }
+        _merge_dialects("TEMPVD", entry, kept, other)
+        assert entry["size_kind"] == "fixed"
+        assert entry["items"] == [{"name": "DATA", "size_type": "ALL"}]
+
+    def test_merge_dialects_keeps_first_shape_when_it_has_the_size(self):
+        entry = {"sections": ["PROPS"], "items": [{"name": "A"}], "records": None,
+                 "size_kind": "fixed", "size_count": 3}
+        kept = {"sections": ["PROPS"], "size": 3, "items": [{"name": "A"}]}
+        other = {"sections": ["PROPS"], "items": [{"name": "B"}]}
+        _merge_dialects("KW", entry, kept, other)
+        assert entry["size_kind"] == "fixed"
+        assert entry["size_count"] == 3
+        assert entry["items"] == [{"name": "A"}]
+
+    def test_merge_dialects_never_reshapes_a_raw_text_keyword(self):
+        raw_kw = next(iter(RAW_TEXT_KEYWORDS))
+        entry = {"sections": ["SCHEDULE"], "items": [], "records": None,
+                 "size_kind": "none", "size_count": None}
+        kept = {"sections": ["SCHEDULE"]}
+        other = {"sections": ["SCHEDULE"], "size": 2, "items": [{"name": "X"}]}
+        _merge_dialects(raw_kw, entry, kept, other)
+        assert entry["size_kind"] == "none"
 
     def test_special_case_rock_is_fixed(self):
         # ROCK's size is the sentinel "SPECIAL_CASE_ROCK", but the record
