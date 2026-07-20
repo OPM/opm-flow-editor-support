@@ -38,9 +38,9 @@
   "main": "./out/extension",
   "contributes": {
     "viewsContainers": {
-      "activitybar": [
+      "panel": [
         {
-          "id": "opm-flow-keywordReferenceContainer",
+          "id": "opm-flow-keywordReferencePanel",
           "title": "OPM Keyword Reference",
           "icon": "media/opm-logo-mono.svg"
         }
@@ -55,7 +55,7 @@
           "when": "resourceLangId == opm-flow"
         }
       ],
-      "opm-flow-keywordReferenceContainer": [
+      "opm-flow-keywordReferencePanel": [
         {
           "type": "webview",
           "id": "opm-flow.docsView",
