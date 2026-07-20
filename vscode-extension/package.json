@@ -383,7 +383,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "jest",
-    "build-index": "py ../scripts/build_keyword_index.py --manual-dir ../opm-reference-manual --output data/keyword_index.json --compact data/keyword_index_compact.json",
+    "build-index": "py ../scripts/build_keyword_index.py --manual-dir ../opm-reference-manual --opm-common-dir ../opm-common/opm/input/eclipse/share/keywords --output data/keyword_index.json --compact data/keyword_index_compact.json",
     "sync-manual-ref": "node scripts/sync-manual-ref.js README.md"
   },
   "jest": {
