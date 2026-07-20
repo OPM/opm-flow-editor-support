@@ -105,7 +105,7 @@ Marketplace listing: <https://marketplace.visualstudio.com/items?itemName=magne-
 ## References
 
 - [equinor/vscode-lang-e100e300](https://github.com/equinor/vscode-lang-e100e300) — VS Code language extension for Eclipse E100/E300 decks
-- [Pyrus Suite](https://pkirkham.github.io/pyrus/) — Peter Kirkham's free toolkit of oil & gas technical tools, including an ECLIPSE deck editor and OPM Flow integration
+- [Pyrus Suite](https://pkirkham.github.io/pyrus/) — Peter Kirkham's free toolkit of oil & gas technical tools, including an ECLIPSE deck editor and OPM Flow integration. Peter Kirkham has contributed valuable feedback and suggestions to this extension.
 
 ## Development
 
