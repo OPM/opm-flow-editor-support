@@ -18,6 +18,23 @@ describe('classifyNameParam', () => {
     expect(classifyNameParam({ name: 'GRPNAME' })).toBe('group');
   });
 
+  it('falls back to the manual mnemonic when the opm-common name does not match', () => {
+    // GRUPNET item 1: opm-common calls it NAME, the manual GRPNAME.
+    expect(
+      classifyNameParam({ name: 'NAME', manual_name: 'GRPNAME', value_type: 'STRING' }),
+    ).toBe('group');
+    // WECONT item 4: FOLLOW_ON_WELL in opm-common, WELL in the manual.
+    expect(
+      classifyNameParam({ name: 'FOLLOW_ON_WELL', manual_name: 'WELL', value_type: 'STRING' }),
+    ).toBe('well');
+  });
+
+  it('still rejects a param when neither name matches', () => {
+    expect(
+      classifyNameParam({ name: 'STATE', manual_name: 'STATUS', value_type: 'STRING' }),
+    ).toBeNull();
+  });
+
   it('rejects non-name items that merely start with WEL / GRP', () => {
     for (const name of ['WELNETWK', 'WELOPEN', 'WELPI', 'GRPNETWK', 'GRPREIN']) {
       expect(classifyNameParam({ name, value_type: 'STRING' })).toBeNull();

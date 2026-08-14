@@ -363,6 +363,83 @@ def _opm_item_for_param(opm_items: list[dict], manual_index) -> Optional[dict]:
     return None
 
 
+def _apply_opm_item(param: dict, item: dict) -> None:
+    """
+    Copy opm-common's facts for one record position onto a manual parameter.
+
+    opm-common is the single source of truth, including for the parameter
+    *name*: it is what the parser accepts and what every downstream consumer
+    (hovers, column headers, diagnostics) should speak. The reference manual
+    often documents the same position under a different mnemonic — COMPDAT
+    item 1 is ``WELL`` in opm-common but ``WELNAME`` in the manual, ACTDIMS
+    item 1 is ``MAX_ACTION`` vs ``MXACTNS`` — and those manual names are what
+    readers of the PDF are looking for. Keep the manual spelling in
+    ``manual_name`` whenever it differs so the docs can show both; a pure
+    difference in case is not worth recording.
+    """
+    opm_name = (item.get("name") or "").strip()
+    if opm_name:
+        manual_name = (param.get("name") or "").strip()
+        if manual_name and manual_name.upper() != opm_name.upper():
+            param["manual_name"] = manual_name
+        param["name"] = opm_name
+    if "value_type" in item:
+        param["value_type"] = item["value_type"]
+    if "dimension" in item:
+        param["dimension"] = item["dimension"]
+
+
+def _manual_numbering_is_broken(params: list[dict]) -> bool:
+    """
+    True when a manual parameter table's "No." column cannot be trusted.
+
+    The reference manual is typeset by hand and a handful of tables mis-number
+    their rows: BCCON runs 1, 2, 2, 3, 4, 5, 6, 7 (item 2 typed twice, so every
+    later row is one short), WPIMULTL repeats 3, DRSDTCON numbers all four rows
+    1, and GPMAINT has rows whose number cell did not survive the conversion at
+    all (parsed as 0). Taken literally those numbers pair each row with the
+    wrong opm-common item, which then puts the wrong name and type on the row.
+    Duplicates, non-increasing runs and positions below 1 are all symptoms;
+    string ranges like "3-52" are legitimate and ignored here.
+    """
+    positions = [p["index"] for p in params if isinstance(p.get("index"), int)]
+    if not positions:
+        return False
+    if any(pos < 1 for pos in positions):
+        return True
+    return len(set(positions)) != len(positions) or positions != sorted(positions)
+
+
+def _merge_param_list(params: list[dict], items: list[dict]) -> tuple[int, bool]:
+    """
+    Merge one record's worth of opm-common *items* into the manual *params*.
+
+    Returns ``(merged_count, realigned)``. Normally each manual row is paired
+    with the item its "No." column points at. When that numbering is broken
+    (see ``_manual_numbering_is_broken``) and the table still has exactly as
+    many rows as opm-common has items, the rows are paired by position instead
+    and renumbered from opm-common — the row *order* is what the manual gets
+    right in these tables. Tables whose row count also disagrees are left on
+    index matching: without a 1:1 correspondence, position is just a different
+    kind of guess.
+    """
+    if items and len(params) == len(items) and _manual_numbering_is_broken(params):
+        for pos, (p, it) in enumerate(zip(params, items), start=1):
+            if isinstance(p.get("index"), int):
+                p["index"] = it.get("item", pos)
+            _apply_opm_item(p, it)
+        return len(params), True
+
+    merged = 0
+    for p in params:
+        it = _opm_item_for_param(items, p.get("index"))
+        if not it:
+            continue
+        _apply_opm_item(p, it)
+        merged += 1
+    return merged, False
+
+
 def _covered_indices(parameters: list[dict]) -> set[int]:
     """Return the set of 1-based record positions already covered by manual params.
 
@@ -418,18 +495,19 @@ def _records_meta(records: list[list[dict]]) -> list[dict]:
 def _merge_records_mode(
     entries: list[dict],
     records: list[list[dict]],
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """
     Merge a multi-record opm-common entry into manual entries.
 
-    Returns ``(merged_param_count, appended_param_count)``. The primary
-    manual entry gets ``records_meta`` and a parameter list grouped by
-    record (record 1 first, then record 2, …). Items missing from the
+    Returns ``(merged_param_count, appended_param_count, realigned_records)``.
+    The primary manual entry gets ``records_meta`` and a parameter list grouped
+    by record (record 1 first, then record 2, …). Items missing from the
     manual are backfilled per record so the column-header generator and
     hovers always have a name.
     """
     merged = 0
     appended = 0
+    realigned = 0
     primary = entries[0]
     manual_params = primary.get("parameters", [])
 
@@ -444,16 +522,10 @@ def _merge_records_mode(
     flat: list[dict] = []
     for ri, rec_items in enumerate(records, start=1):
         rec_params = by_record.get(ri, [])
-        # Copy type/dimension into manual params from the matching item.
-        for p in rec_params:
-            it = _opm_item_for_param(rec_items, p.get("index"))
-            if not it:
-                continue
-            if "value_type" in it:
-                p["value_type"] = it["value_type"]
-            if "dimension" in it:
-                p["dimension"] = it["dimension"]
-            merged += 1
+        # Copy name/type/dimension into manual params from the matching item.
+        m, was_realigned = _merge_param_list(rec_params, rec_items)
+        merged += m
+        realigned += int(was_realigned)
         # Backfill items not represented in the manual.
         covered = _covered_indices(rec_params)
         for pos, it in enumerate(rec_items, start=1):
@@ -475,7 +547,7 @@ def _merge_records_mode(
     records_meta = _records_meta(records)
     for e in entries:
         e["records_meta"] = records_meta
-    return merged, appended
+    return merged, appended, realigned
 
 
 def _attach_cross_keyword(entry: dict, opm: dict) -> None:
@@ -499,16 +571,20 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
       the extension to flag records with too many values. Single-record
       keywords get ``expected_columns``; multi-record keywords get
       ``records_meta`` (a list of ``{expected_columns?: int}`` per record).
-    - parameters: each gets optional value_type and dimension copied from
-      the matching opm-common item, and any opm-common items not represented
-      in the manual are appended (so the per-record param list is complete
-      even when the reference manual is missing entries).
+    - parameters: each takes its name from the matching opm-common item
+      (the manual's spelling moves to ``manual_name`` when the two differ),
+      plus optional value_type and dimension. Any opm-common items not
+      represented in the manual are appended (so the per-record param list is
+      complete even when the reference manual is missing entries). Manual
+      tables that mis-number their own rows are re-paired by position and
+      renumbered — see ``_merge_param_list``.
 
     Manual entries that have no opm-common counterpart are left unchanged.
     """
     merged_sections = 0
     merged_params = 0
     appended_params = 0
+    realigned_tables = 0
     for name, entry in index.items():
         opm = opm_common_index.get(name)
         if not opm:
@@ -540,9 +616,12 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
 
         records = opm.get("records")
         if records:
-            m, a = _merge_records_mode(entries, records)
+            m, a, r = _merge_records_mode(entries, records)
             merged_params += m
             appended_params += a
+            if r:
+                realigned_tables += 1
+                print(f"    NOTE: {name} record numbering realigned to opm-common")
             continue
 
         # Single-record (items-shaped) merge.
@@ -560,15 +639,11 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
 
         primary = entries[0]
         manual_params = primary.get("parameters", [])
-        for p in manual_params:
-            it = _opm_item_for_param(opm["items"], p.get("index"))
-            if not it:
-                continue
-            if "value_type" in it:
-                p["value_type"] = it["value_type"]
-            if "dimension" in it:
-                p["dimension"] = it["dimension"]
-            merged_params += 1
+        m, was_realigned = _merge_param_list(manual_params, opm["items"])
+        merged_params += m
+        if was_realigned:
+            realigned_tables += 1
+            print(f"    NOTE: {name} item numbering realigned to opm-common")
 
         # Backfill items the manual is missing (e.g. COMPDAT item 14 / PR).
         # Without this, the column-header generator falls back to "COL14"
@@ -590,7 +665,8 @@ def merge_opm_common(index: dict, opm_common_index: dict) -> None:
             primary["parameters"] = manual_params
     print(
         f"Merged opm-common: {merged_sections} keywords, "
-        f"{merged_params} parameters, {appended_params} backfilled"
+        f"{merged_params} parameters, {appended_params} backfilled, "
+        f"{realigned_tables} mis-numbered tables realigned"
     )
 
 
@@ -606,17 +682,21 @@ _OPTION_BLOCKLIST = {"NOTE", "NB"}
 _OPTION_MIN = 2  # only attach when at least this many distinct options found
 
 
-def extract_string_options(description: str, param_name: str) -> list[str]:
+def extract_string_options(description: str, *param_names: str) -> list[str]:
     """
     Pull `WORD:` enum tokens out of a parameter description.
     Returns a deduplicated list in first-seen order, excluding the param's own
-    name and a small blocklist of prose tokens like NOTE.
+    name(s) and a small blocklist of prose tokens like NOTE. Several names may
+    be passed because a parameter carries both the opm-common name and, when
+    it differs, the manual's mnemonic — the description is manual prose, so it
+    is the manual name that tends to appear in it.
     """
     if not description:
         return []
+    self_names = {n for n in param_names if n}
     seen: list[str] = []
     for tok in _OPTION_RE.findall(description):
-        if tok == param_name or tok in _OPTION_BLOCKLIST or tok in seen:
+        if tok in self_names or tok in _OPTION_BLOCKLIST or tok in seen:
             continue
         seen.append(tok)
     return seen
@@ -634,7 +714,9 @@ def attach_string_options(index: dict) -> int:
         for p in primary.get("parameters", []):
             if p.get("value_type") != "STRING":
                 continue
-            opts = extract_string_options(p.get("description", ""), p.get("name", ""))
+            opts = extract_string_options(
+                p.get("description", ""), p.get("name", ""), p.get("manual_name", "")
+            )
             if len(opts) >= _OPTION_MIN:
                 p["options"] = opts
                 attached += 1
@@ -984,22 +1066,26 @@ _RECORD_INDEX_RE = re.compile(r"^(\d+)-(\d+)$")
 
 def _detect_record_mode(raw_rows: list[list[tuple[str, int]]]) -> bool:
     """
-    True when the index column carries record-major coordinates spanning
-    multiple records — e.g. WELSEGS rows ``1-1..1-13`` plus ``2-1..2-16``.
+    True when the index column carries record-major coordinates — e.g. WELSEGS
+    rows ``1-1..1-13`` plus ``2-1..2-16``, or ACTIONW's single record written
+    ``1-1..1-7``.
 
-    Single-record grouped indices like WLIST's ``3-52`` (one cell, one
-    distinct record number) do not qualify; only the second pattern, where
-    at least two distinct record numbers appear, switches us into the
-    multi-record interpretation of "X-Y".
+    A grouped index like WLIST's ``3-52`` means "items 3 through 52" and is a
+    range, not a coordinate. The two read identically in one cell, so the tell
+    is repetition: a range appears on its own row, while coordinates come as a
+    run of rows sharing a record prefix. Requiring either two distinct record
+    numbers or two rows under one record number separates them.
     """
     record_numbers: set[int] = set()
+    coordinate_rows = 0
     for cells in raw_rows:
         if not cells:
             continue
         m = _RECORD_INDEX_RE.match(cells[0][0].strip())
         if m:
             record_numbers.add(int(m.group(1)))
-            if len(record_numbers) >= 2:
+            coordinate_rows += 1
+            if len(record_numbers) >= 2 or coordinate_rows >= 2:
                 return True
     return False
 
@@ -1093,6 +1179,18 @@ def parse_param_table(table_elem) -> list[dict]:
 
             desc    = cells[cell_idx][0] if cell_idx < len(cells) else ""
             default = cells[cell_idx + 1][0] if cell_idx + 1 < len(cells) else ""
+
+            # Drop rows that belong to a reference table the manual embeds
+            # inside the parameter block: ACTIONW lists every summary vector it
+            # can trigger on ("Bottom-Hole Pressure" / WBHP), EHYSTR the HYSTMOD
+            # model options ("Carlson Hysteresis Model" / SATNUM). Both restart
+            # their own numbering, so left in they shadow the real items. A
+            # parameter name is always a single deck token, and these rows put a
+            # prose label there and leave the Default column empty — the pair of
+            # traits is what separates them from a genuine row that merely has
+            # no default.
+            if any(" " in part for part in name_parts) and not default.strip():
+                continue
 
             pending_param = {
                 "index":       idx,
@@ -1283,7 +1381,13 @@ def parse_keyword_file(fodt_path: Path, section: str) -> dict:
 
         # The parameter table starts with "No." in the first cell
         if "No." in first_row_texts:
-            params = parse_param_table(tbl)
+            # A page can carry more than one such table; the later one usually
+            # refines the earlier (TVDP documents the keyword name first, then
+            # the data columns), so last wins. ACTIONW is the exception: its
+            # second table is a summary-vector reference list whose rows are
+            # all discarded, and an empty result must not blank out the real
+            # parameter table parsed before it.
+            params = parse_param_table(tbl) or params
         elif i > 0:
             example_table_md_parts.extend(extract_example_tables([tbl]))
 

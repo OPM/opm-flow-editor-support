@@ -177,9 +177,26 @@ th, td {
 th { background: var(--bg-soft); font-size: 0.82rem; }
 
 th.num, td.num { width: 3rem; white-space: nowrap; }
-th.name, td.name { white-space: nowrap; }
+/* Parameter names come from opm-common and can be long and underscore-heavy
+   (CONNECTION_TRANSMISSIBILITY_FACTOR). The generator marks break opportunities
+   at the underscores, so let the cell use them instead of one long name setting
+   the width of the whole column. */
+th.name, td.name { overflow-wrap: break-word; max-width: 11rem; }
+
+/* Descriptions are the point of the table: claim room for them before the
+   optional type/unit/default columns divide up what is left. Wider than the
+   viewport is fine — .table-wrap scrolls. */
+th.desc, td.desc { min-width: 22rem; }
 
 .options { margin-top: 0.35rem; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+/* Reference-manual mnemonic, shown when it differs from the opm-common name. */
+.manual-name {
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+}
+.manual-name code { font-size: inherit; }
 
 /* --- Variants and pager ------------------------------------------------- */
 
@@ -196,11 +213,11 @@ th.name, td.name { white-space: nowrap; }
 }
 .pager a:only-child:last-child { margin-left: auto; }
 
-/* --- Front page --------------------------------------------------------- */
+/* --- Front page and listing pages --------------------------------------- */
 
 .controls { margin: 1.25rem 0 0.5rem; }
 
-#kw-search {
+#kw-search, #alias-search {
   width: 100%;
   padding: 0.6rem 0.8rem;
   font-size: 1rem;
@@ -210,7 +227,10 @@ th.name, td.name { white-space: nowrap; }
   border: 1px solid var(--border);
   border-radius: 6px;
 }
-#kw-search:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+#kw-search:focus, #alias-search:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Pointer from the front page to the other listings. */
+.page-links { margin: 0.6rem 0 0; font-size: 0.92rem; color: var(--fg-muted); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.7rem 0; }
 

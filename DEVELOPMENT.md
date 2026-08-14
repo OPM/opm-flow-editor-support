@@ -39,10 +39,15 @@ opm-flow-editor-support/
     └── package.json
 ```
 
-The two upstream sources are merged into a single index: `opm-reference-manual`
-provides descriptions, units, and examples; `opm-common` provides authoritative
-section validity and per-parameter `value_type` (INT/DOUBLE/STRING/…) and
-`dimension` (Length/Pressure/…) — both surfaced in hover and the docs panel.
+The two upstream sources are merged into a single index. `opm-common` is the
+source of truth — it decides the parameter **name**, the sections a keyword is
+valid in, the record shape, and each parameter's `value_type`
+(INT/DOUBLE/STRING/…) and `dimension` (Length/Pressure/…).
+`opm-reference-manual` supplies what the parser has no opinion on:
+descriptions, units, and examples. Where the manual documents a parameter under
+a different mnemonic (COMPDAT item 1 is `WELL` in opm-common, `WELNAME` in the
+manual), the manual's spelling is kept alongside as `manual_name` and shown
+under the name on the keyword website.
 
 ## Clone
 
@@ -142,9 +147,11 @@ into that marker, so the listing always shows the data revision being shipped.
 ## Build the keyword website
 
 `scripts/build_keyword_site.py` renders the keyword data as a static site —
-one page per keyword plus a searchable front page — that is published to GitHub
-Pages. It needs the **full** `keyword_index.json`; the compact index bundled
-with the extension has no descriptions.
+one page per keyword, a searchable front page, and `manual-names.html`, an
+overview of every parameter whose reference-manual mnemonic differs from the
+opm-common name — that is published to GitHub Pages. It needs the **full**
+`keyword_index.json`; the compact index bundled with the extension has no
+descriptions.
 
 ```sh
 python scripts/build_keyword_index.py \

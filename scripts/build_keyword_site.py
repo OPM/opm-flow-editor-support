@@ -423,6 +423,23 @@ def visible_param_columns(params: list[dict]) -> set[str]:
     return visible
 
 
+def render_param_name(p: dict) -> str:
+    """
+    The name cell. The index names parameters after opm-common, the parser's
+    source of truth; where the reference manual documents the same position
+    under a different mnemonic the build keeps it in ``manual_name``. Show it
+    underneath so readers coming from the PDF can still find the row.
+    """
+    cell = f'<code>{esc_breaks(p.get("name"))}</code>'
+    manual = (p.get("manual_name") or "").strip()
+    if manual:
+        cell += (
+            '<div class="manual-name">manual: '
+            f"<code>{esc_breaks(manual)}</code></div>"
+        )
+    return f'<td class="name">{cell}</td>'
+
+
 def render_param_rows(params: list[dict], columns: set[str]) -> str:
     rows = []
     for p in params:
@@ -434,8 +451,8 @@ def render_param_rows(params: list[dict], columns: set[str]) -> str:
             description += f'<div class="options">{chips}</div>'
         cells = [
             f'<td class="num">{esc(p.get("index"))}</td>',
-            f'<td class="name"><code>{esc(p.get("name"))}</code></td>',
-            f"<td>{description}</td>",
+            render_param_name(p),
+            f'<td class="desc">{description}</td>',
         ]
         if "type" in columns:
             cells.append(f'<td>{esc_breaks(p.get("value_type"))}</td>')
@@ -462,7 +479,11 @@ def render_param_table(entry: dict, level: int) -> str:
     if not params:
         return ""
     columns = visible_param_columns(params)
-    headers = ['<th class="num">No.</th>', '<th class="name">Name</th>', "<th>Description</th>"]
+    headers = [
+        '<th class="num">No.</th>',
+        '<th class="name">Name</th>',
+        '<th class="desc">Description</th>',
+    ]
     for key, label in (
         ("type", "Type"), ("dimension", "Dimension"), ("field", "Field"),
         ("metric", "Metric"), ("lab", "Lab"), ("default", "Default"),
@@ -656,7 +677,11 @@ def front_page_summary(entries: list[dict]) -> str:
     return summary[:FRONT_PAGE_SUMMARY_CHARS].rstrip() + "…"
 
 
-def render_front_page(index: dict[str, list[dict]], ctx: SiteContext) -> str:
+def render_front_page(
+    index: dict[str, list[dict]],
+    ctx: SiteContext,
+    manual_name_count: int = 0,
+) -> str:
     names = sorted(index)
 
     used_sections = {s for entries in index.values() for s in keyword_sections(entries)}
@@ -698,11 +723,19 @@ def render_front_page(index: dict[str, list[dict]], ctx: SiteContext) -> str:
         )
     close_group()
 
+    manual_names_link = (
+        f'<p class="page-links"><a href="{MANUAL_NAMES_PAGE}">'
+        f"{esc(MANUAL_NAMES_TITLE)}</a> &mdash; the "
+        f"{manual_name_count} parameters the manual calls something else</p>"
+        if manual_name_count else ""
+    )
+
     body = (
         f"<h1>{esc(SITE_TITLE)}</h1>"
         '<p class="lede">Every keyword OPM Flow understands, extracted from the '
         f'<a href="{MANUAL_REPO}">OPM Flow Reference Manual</a> and the '
         'opm-common parser definitions.</p>'
+        f"{manual_names_link}"
         '<div class="controls">'
         '<input type="search" id="kw-search" placeholder="Search keywords and summaries…" '
         'autocomplete="off" spellcheck="false">'
@@ -717,6 +750,107 @@ def render_front_page(index: dict[str, list[dict]], ctx: SiteContext) -> str:
     return page_shell(
         title=SITE_TITLE,
         description=f"Searchable reference for all {len(names)} OPM Flow deck keywords.",
+        body=body,
+        depth=0,
+        ctx=ctx,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Render layer — manual name differences
+# ---------------------------------------------------------------------------
+
+MANUAL_NAMES_PAGE = "manual-names.html"
+MANUAL_NAMES_TITLE = "Manual name differences"
+
+
+def _param_sort_key(row: dict) -> tuple:
+    """Order rows the way a deck reads them: keyword, record, item."""
+    index = row["index"]
+    position = index if isinstance(index, int) else int(str(index).split("-")[0])
+    return (row["keyword"], row["record"] or 0, position)
+
+
+def collect_manual_name_differences(index: dict[str, list[dict]]) -> list[dict]:
+    """
+    Every parameter the reference manual names differently from opm-common.
+
+    The index names parameters after opm-common and keeps the manual's mnemonic
+    in ``manual_name`` only where the two disagree, so the presence of the field
+    is the whole selection rule. Multi-chapter keywords repeat their parameter
+    list per variant, hence the dedupe.
+    """
+    seen: set[tuple] = set()
+    rows: list[dict] = []
+    for keyword, entries in index.items():
+        for entry in entries:
+            for p in entry.get("parameters") or []:
+                manual = (p.get("manual_name") or "").strip()
+                name = (p.get("name") or "").strip()
+                if not manual or not name:
+                    continue
+                row = {
+                    "keyword": keyword,
+                    "record": p.get("record"),
+                    "index": p.get("index"),
+                    "name": name,
+                    "manual_name": manual,
+                }
+                key = tuple(row.values())
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(row)
+    rows.sort(key=_param_sort_key)
+    return rows
+
+
+def render_manual_names_page(rows: list[dict], ctx: SiteContext) -> str:
+    keywords = len({row["keyword"] for row in rows})
+    body_rows = []
+    for row in rows:
+        item = f'{row["record"]}-{row["index"]}' if row["record"] else str(row["index"])
+        href = ctx.keyword_href(row["keyword"], prefix="keywords/")
+        link = (
+            f'<a href="{href}">{esc(row["keyword"])}</a>' if href
+            else esc(row["keyword"])
+        )
+        body_rows.append(
+            '<tr class="alias">'
+            f'<td class="name">{link}</td>'
+            f'<td class="num">{esc(item)}</td>'
+            f'<td class="name"><code>{esc_breaks(row["name"])}</code></td>'
+            f'<td class="name"><code>{esc_breaks(row["manual_name"])}</code></td>'
+            "</tr>"
+        )
+
+    body = (
+        f"<h1>{esc(MANUAL_NAMES_TITLE)}</h1>"
+        '<p class="lede">Parameters are named after the opm-common parser '
+        "definitions, which decide what OPM Flow actually accepts. Where the "
+        "reference manual documents the same item under a different mnemonic, "
+        "both names are listed here and on the keyword page — useful when "
+        "moving between a deck, the manual PDF and the parser. "
+        f"{len(rows)} parameters across {keywords} keywords are affected.</p>"
+        '<div class="controls">'
+        '<input type="search" id="alias-search" '
+        'placeholder="Search keywords and parameter names…" '
+        'autocomplete="off" spellcheck="false">'
+        f'<p class="count" id="alias-count">{len(rows)} parameters</p>'
+        "</div>"
+        '<div class="table-wrap"><table><thead><tr>'
+        '<th class="name">Keyword</th><th class="num">Item</th>'
+        "<th>opm-common name</th><th>Manual name</th>"
+        f'</tr></thead><tbody>{"".join(body_rows)}</tbody></table></div>'
+        '<p class="empty" id="alias-empty" hidden>No parameters match that filter.</p>'
+        '<script src="assets/site.js" defer></script>'
+    )
+    return page_shell(
+        title=f"{MANUAL_NAMES_TITLE} — {SITE_TITLE}",
+        description=(
+            f"{len(rows)} OPM Flow parameters across {keywords} keywords whose "
+            "reference-manual mnemonic differs from the opm-common name."
+        ),
         body=body,
         depth=0,
         ctx=ctx,
@@ -766,7 +900,15 @@ def write_site(index: dict[str, list[dict]], out_dir: Path, ctx: SiteContext) ->
         page = render_keyword_page(name, index[name], ctx, neighbours)
         (keywords_dir / f"{ctx.slugs[name]}.html").write_text(page, encoding="utf-8")
 
-    (out_dir / "index.html").write_text(render_front_page(index, ctx), encoding="utf-8")
+    manual_names = collect_manual_name_differences(index)
+    (out_dir / MANUAL_NAMES_PAGE).write_text(
+        render_manual_names_page(manual_names, ctx), encoding="utf-8"
+    )
+
+    (out_dir / "index.html").write_text(
+        render_front_page(index, ctx, manual_name_count=len(manual_names)),
+        encoding="utf-8",
+    )
     with open(out_dir / "search-index.json", "w", encoding="utf-8") as f:
         json.dump(build_search_index(index), f, separators=(",", ":"), ensure_ascii=False)
 
