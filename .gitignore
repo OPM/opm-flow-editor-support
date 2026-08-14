@@ -14,6 +14,9 @@ venv/
 keyword_index.json
 keyword_summary.tsv
 
+# Generated documentation site (published to GitHub Pages from CI)
+site/
+
 # Editor / OS
 .vscode/
 .idea/

@@ -7,9 +7,12 @@ opm-flow-editor-support/
 ├── opm-reference-manual/    # git submodule — keyword docs (.fodt)
 ├── opm-common/              # git submodule — parser truth (sparse: only
 │                            #   opm/input/eclipse/share/keywords)
-├── scripts/                 # keyword-index builder (Python)
+├── scripts/                 # keyword-index builder + site generator (Python)
 │   ├── build_keyword_index.py
 │   ├── test_build_keyword_index.py   # pytest suite for the builder
+│   ├── build_keyword_site.py         # renders the index as a static website
+│   ├── test_build_keyword_site.py    # pytest suite for the generator
+│   ├── site_assets/                  # style.css + site.js copied into the site
 │   └── requirements.txt
 ├── demo-decks/              # runnable sample decks + VIDEO-SCRIPT.md walkthrough
 ├── examples/                # small decks illustrating single features
@@ -135,6 +138,50 @@ npm run build-index
 `<!-- manual-ref:start -->` marker. `npm run sync-manual-ref` (also part of
 `vscode:prepublish`) stamps the current `opm-reference-manual` submodule commit
 into that marker, so the listing always shows the data revision being shipped.
+
+## Build the keyword website
+
+`scripts/build_keyword_site.py` renders the keyword data as a static site —
+one page per keyword plus a searchable front page — that is published to GitHub
+Pages. It needs the **full** `keyword_index.json`; the compact index bundled
+with the extension has no descriptions.
+
+```sh
+python scripts/build_keyword_index.py \
+    --manual-dir opm-reference-manual \
+    --opm-common-dir opm-common/opm/input/eclipse/share/keywords \
+    --output keyword_index.json
+
+python scripts/build_keyword_site.py \
+    --index keyword_index.json \
+    --output site \
+    --manual-ref "$(git -C opm-reference-manual rev-parse HEAD)"
+```
+
+`--manual-ref` pins the per-page "Manual source" links to a submodule commit; it
+defaults to `main`. The output (`site/`, gitignored) is ~10 MB across ~3 160
+pages. All links are relative, so preview it either way:
+
+```sh
+python -m http.server -d site 8000    # then open http://localhost:8000/
+```
+
+The generator is stdlib-only — no additions to `requirements.txt` — and its
+pytest suite runs as part of the existing `pytest scripts/`.
+
+### Publishing
+
+The `build-index` job in `.github/workflows/build-vsix.yml` builds the site and
+uploads it as a Pages artifact on every run; the `deploy-pages` job publishes it
+on pushes to `main`. Pull requests build but do not deploy.
+
+> **One-time repository setup:** GitHub Pages must be switched to
+> **Settings → Pages → Source: GitHub Actions**. Until then `deploy-pages`
+> fails with "Pages is not enabled".
+
+Keyword documentation on the site comes from the OPM Flow reference manual,
+which is licensed CC BY 4.0 — every generated page carries the required
+attribution in its footer.
 
 ## Release
 

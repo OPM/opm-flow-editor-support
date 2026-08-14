@@ -49,6 +49,21 @@ jobs:
           path: vscode-extension/data/keyword_index_compact.json
           if-no-files-found: error
 
+      # The documentation site is built here rather than in its own workflow so
+      # it reuses the full keyword_index.json produced above — only the full
+      # index carries the descriptions the site renders, and it is gitignored.
+      - name: Build documentation site
+        run: |
+          python scripts/build_keyword_site.py \
+            --index keyword_index.json \
+            --output site \
+            --manual-ref "$(git -C opm-reference-manual rev-parse HEAD)"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: site
+
   package:
     needs: build-index
     runs-on: ubuntu-latest
@@ -99,6 +114,29 @@ jobs:
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3
         with:
           files: vscode-extension/opm-flow-editor-support-*.vsix
+
+  # Publishes the keyword reference to GitHub Pages. Pull requests build the
+  # site in build-index (catching generator breakage) but never deploy.
+  #
+  # Requires Settings -> Pages -> Source: "GitHub Actions" on the repository;
+  # until that is set, this job fails with "Pages is not enabled".
+  deploy-pages:
+    needs: build-index
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128  # v5.0.0
 
   publish-marketplace:
     needs: package

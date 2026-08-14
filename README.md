@@ -3,6 +3,10 @@
 VS Code extension providing editor support for OPM Flow simulation deck files,
 backed by the full [OPM Flow reference manual](https://github.com/OPM/opm-reference-manual).
 
+**Browse the keyword reference online:** <https://opm.github.io/opm-flow-editor-support/> —
+every OPM Flow keyword with its sections, summary, description, parameters and
+examples, searchable, no install required.
+
 ## Install
 
 ### From the VS Code Marketplace
