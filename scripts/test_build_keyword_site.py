@@ -23,6 +23,7 @@ from build_keyword_site import (
     build_search_index,
     build_slug_map,
     clean_description,
+    collect_manual_name_differences,
     entry_sections,
     is_known_to_parser,
     keyword_sections,
@@ -32,6 +33,7 @@ from build_keyword_site import (
     render_examples,
     render_front_page,
     render_keyword_page,
+    render_manual_names_page,
     render_param_table,
     slug,
     strip_flat_param_tables,
@@ -283,6 +285,24 @@ def test_param_table_renders_options_as_chips():
     assert "<code>YES</code><code>NO</code>" in html
 
 
+def test_param_table_shows_the_manual_name_when_it_differs():
+    html = render_param_table(entry(parameters=[
+        {"index": 1, "name": "WELL", "manual_name": "WELNAME", "description": "d",
+         "units": {}, "default": ""},
+    ]), level=2)
+
+    assert "<code>WELL</code>" in html
+    assert '<div class="manual-name">manual: <code>WELNAME</code></div>' in html
+
+
+def test_param_table_omits_the_manual_name_when_absent():
+    html = render_param_table(entry(parameters=[
+        {"index": 1, "name": "WELL", "description": "d", "units": {}, "default": ""},
+    ]), level=2)
+
+    assert "manual-name" not in html
+
+
 def test_param_table_joins_list_dimensions():
     html = render_param_table(entry(parameters=[
         {"index": 1, "name": "X", "description": "d", "units": {},
@@ -450,6 +470,104 @@ def test_front_page_lists_every_keyword_with_filter_metadata():
     assert 'id="letter-A"' in page and 'id="letter-W"' in page
 
 
+# ---------------------------------------------------------------------------
+# Manual name differences page
+# ---------------------------------------------------------------------------
+
+def _alias_index():
+    return {
+        "COMPDAT": [entry(name="COMPDAT", parameters=[
+            {"index": 1, "name": "WELL", "manual_name": "WELNAME",
+             "description": "", "units": {}, "default": ""},
+            {"index": 2, "name": "I", "description": "", "units": {}, "default": ""},
+        ])],
+        "ACTDIMS": [entry(name="ACTDIMS", parameters=[
+            {"index": 1, "name": "MAX_ACTION", "manual_name": "MXACTNS",
+             "description": "", "units": {}, "default": ""},
+        ])],
+    }
+
+
+def test_manual_name_differences_lists_only_renamed_params_sorted():
+    rows = collect_manual_name_differences(_alias_index())
+
+    assert [(r["keyword"], r["index"], r["name"], r["manual_name"]) for r in rows] == [
+        ("ACTDIMS", 1, "MAX_ACTION", "MXACTNS"),
+        ("COMPDAT", 1, "WELL", "WELNAME"),
+    ]
+
+
+def test_manual_name_differences_sorts_by_record_then_item():
+    index = {"WELSEGS": [entry(name="WELSEGS", parameters=[
+        {"index": 2, "record": 2, "name": "B", "manual_name": "b",
+         "description": "", "units": {}, "default": ""},
+        {"index": 1, "record": 1, "name": "A", "manual_name": "a",
+         "description": "", "units": {}, "default": ""},
+        {"index": 1, "record": 2, "name": "C", "manual_name": "c",
+         "description": "", "units": {}, "default": ""},
+    ])]}
+
+    rows = collect_manual_name_differences(index)
+
+    assert [r["name"] for r in rows] == ["A", "C", "B"]
+
+
+def test_manual_name_differences_dedupes_repeated_variants():
+    # A keyword documented in two manual chapters carries the same parameter
+    # list on each variant — the overview must list it once.
+    param = {"index": 1, "name": "WELL", "manual_name": "WELNAME",
+             "description": "", "units": {}, "default": ""}
+    index = {"COMPDAT": [
+        entry(name="COMPDAT", section="GRID", parameters=[dict(param)]),
+        entry(name="COMPDAT", section="SCHEDULE", parameters=[dict(param)]),
+    ]}
+
+    assert len(collect_manual_name_differences(index)) == 1
+
+
+def test_manual_names_page_renders_rows_and_links_to_keywords():
+    index = _alias_index()
+    rows = collect_manual_name_differences(index)
+    ctx = SiteContext(build_slug_map(index), manual_ref="main", manual_short="")
+
+    page = render_manual_names_page(rows, ctx)
+
+    assert page.count('<tr class="alias">') == 2
+    assert '<a href="keywords/COMPDAT.html">COMPDAT</a>' in page
+    assert "<code>WELL</code>" in page and "<code>WELNAME</code>" in page
+    assert "2 parameters across 2 keywords" in page
+    # The record-less rows show a bare item number.
+    assert '<td class="num">1</td>' in page
+
+
+def test_manual_names_page_shows_record_qualified_item_numbers():
+    index = {"WELSEGS": [entry(name="WELSEGS", parameters=[
+        {"index": 3, "record": 2, "name": "SEGMENT", "manual_name": "SEGNO",
+         "description": "", "units": {}, "default": ""},
+    ])]}
+    rows = collect_manual_name_differences(index)
+    ctx = SiteContext(build_slug_map(index), manual_ref="main", manual_short="")
+
+    assert '<td class="num">2-3</td>' in render_manual_names_page(rows, ctx)
+
+
+def test_front_page_links_to_the_manual_names_page():
+    index = _alias_index()
+    ctx = SiteContext(build_slug_map(index), manual_ref="main", manual_short="")
+
+    page = render_front_page(index, ctx, manual_name_count=2)
+
+    assert 'href="manual-names.html"' in page
+    assert "2 parameters" in page
+
+
+def test_front_page_omits_the_link_when_nothing_differs():
+    index = {"ACTDIMS": [entry(name="ACTDIMS")]}
+    ctx = SiteContext(build_slug_map(index), manual_ref="main", manual_short="")
+
+    assert "manual-names.html" not in render_front_page(index, ctx)
+
+
 def test_search_index_is_compact_and_sorted():
     index = {
         "WOPR": [entry(name="WOPR", summary="x" * 500, sections_opm=["SUMMARY"])],
@@ -465,8 +583,9 @@ def test_search_index_is_compact_and_sorted():
 def test_build_site_end_to_end_and_every_internal_link_resolves(tmp_path):
     index = {
         "ACTDIMS": [entry(name="ACTDIMS", sections_opm=["RUNSPEC"], parameters=[
-            {"index": 1, "name": "MXACTNS", "description": "A count.", "units": {},
-             "default": "2", "value_type": "INT"},
+            {"index": 1, "name": "MAX_ACTION", "manual_name": "MXACTNS",
+             "description": "A count.", "units": {}, "default": "2",
+             "value_type": "INT"},
         ])],
         "RGFR+": [entry(name="RGFR+", section="SUMMARY", alias_of="ACTDIMS")],
         "MULTX-": [entry(name="MULTX-", sections_opm=["GRID"])],
@@ -478,6 +597,7 @@ def test_build_site_end_to_end_and_every_internal_link_resolves(tmp_path):
 
     assert written == 4
     assert (tmp_path / "index.html").exists()
+    assert (tmp_path / "manual-names.html").exists()
     assert (tmp_path / ".nojekyll").exists()
     assert (tmp_path / "assets" / "style.css").exists()
     assert (tmp_path / "assets" / "site.js").exists()

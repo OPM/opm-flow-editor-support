@@ -441,6 +441,47 @@ class TestParseParamTable:
         assert params[2]["index"] == "3-52"
         assert "record" not in params[2]
 
+    def test_single_record_coordinates_are_record_mode(self):
+        # ACTIONW-style: one record written out as 1-1, 1-2, 1-3. A run of
+        # rows under one record prefix is coordinates, not a "3-52" range,
+        # so the index becomes the item number.
+        tbl = self._param_table(
+            ("1-1", "ACTNAME",  "action name", "None"),
+            ("1-2", "ACTWELL",  "well name",   "None"),
+            ("1-3", "ACTLHS",   "left side",   "Not Applicable"),
+        )
+        elem = self._table_elem(tbl)
+        params = parse_param_table(elem)
+        assert [(p["record"], p["index"], p["name"]) for p in params] == [
+            (1, 1, "ACTNAME"),
+            (1, 2, "ACTWELL"),
+            (1, 3, "ACTLHS"),
+        ]
+
+    def test_embedded_reference_rows_are_dropped(self):
+        # EHYSTR/ACTIONW embed a reference table inside the parameter block:
+        # its rows put a prose label in the Name column and leave Default
+        # empty. Real parameters keep their place.
+        tbl = self._param_table(
+            (1, "HYSTRCP", "curvature", "0.1"),
+            (2, "HYSTMOD", "model number", "0"),
+            (0, "Carlson Hysteresis Model", "SATNUM", ""),
+            (1, "Killough Hysteresis Model", "IMBNUM", ""),
+            (3, "HYSTREL", "curvature parameter", "1.0"),
+        )
+        elem = self._table_elem(tbl)
+        params = parse_param_table(elem)
+        assert [(p["index"], p["name"]) for p in params] == [
+            (1, "HYSTRCP"), (2, "HYSTMOD"), (3, "HYSTREL"),
+        ]
+
+    def test_multi_word_name_with_a_default_is_kept(self):
+        # The reference-row filter needs both traits — a row that merely has a
+        # spaced name but does carry a default is still a parameter.
+        tbl = self._param_table((1, "Volumetric Flow", "flow", "0"))
+        elem = self._table_elem(tbl)
+        assert len(parse_param_table(elem)) == 1
+
 
 # ---------------------------------------------------------------------------
 # parse_keyword_file — full .fodt parsing with a minimal fixture
@@ -522,6 +563,22 @@ class TestParseKeywordFile:
         assert len(result["parameters"]) == 2
         assert result["parameters"][0]["name"] == "WNAME"
         assert result["parameters"][1]["name"] == "GNAME"
+
+    def test_reference_table_does_not_blank_the_parameter_table(self, tmp_path):
+        # ACTIONW-shaped page: the real parameter table is followed by a
+        # summary-vector reference list that also opens with "No." but whose
+        # rows are all reference rows. The real parameters must survive.
+        header = _row("No.", "Name", "Description", "Default")
+        real = _table(header, _row("1", "ACTNAME", "Action name", "None"))
+        reference = _table(
+            header,
+            _row("1", "Bottom-Hole Pressure", "WBHP", ""),
+            _row("2", "Gas Injection Rate", "WGIR", ""),
+        )
+        body = _p("Defines an action. A long enough paragraph.") + real + reference
+        fodt = self._write_fodt(tmp_path, "ACTIONW", body)
+        result = parse_keyword_file(fodt, "SCHEDULE")
+        assert [p["name"] for p in result["parameters"]] == ["ACTNAME"]
 
     def test_parameters_with_units_extracted(self, tmp_path):
         header = _row("No.", "Name", "Description", "Default")
@@ -951,6 +1008,127 @@ class TestMergeOpmCommon:
         assert merged[1]["value_type"] == "INT"
         assert merged[1]["dimension"] == "Length"
 
+    def test_opm_common_name_wins_and_manual_name_is_kept(self):
+        # COMPDAT item 1: opm-common calls it WELL, the manual WELNAME.
+        params = [
+            {"index": 1, "name": "WELNAME", "description": "...", "units": {}, "default": "None"},
+        ]
+        index = {"COMPDAT": self._manual_entry(params=params)}
+        opm = {"COMPDAT": {
+            "sections": ["SCHEDULE"],
+            "items": [{"item": 1, "name": "WELL", "value_type": "STRING"}],
+        }}
+        merge_opm_common(index, opm)
+        p = index["COMPDAT"]["parameters"][0]
+        assert p["name"] == "WELL"
+        assert p["manual_name"] == "WELNAME"
+
+    def test_identical_name_records_no_manual_name(self):
+        params = [
+            {"index": 1, "name": "MAX_ACTION", "description": "", "units": {}, "default": ""},
+            # Differs only by case — not worth surfacing as an alternative name.
+            {"index": 2, "name": "Kh", "description": "", "units": {}, "default": ""},
+        ]
+        index = {"ACTDIMS": self._manual_entry(params=params)}
+        opm = {"ACTDIMS": {
+            "sections": ["RUNSPEC"],
+            "items": [{"name": "MAX_ACTION"}, {"name": "KH"}],
+        }}
+        merge_opm_common(index, opm)
+        merged = index["ACTDIMS"]["parameters"]
+        assert "manual_name" not in merged[0]
+        assert merged[1]["name"] == "KH"
+        assert "manual_name" not in merged[1]
+
+    def test_mis_numbered_manual_table_is_realigned_by_position(self):
+        # BCCON: the manual's No. column reads 1, 2, 2, 3, … so every row from
+        # the duplicate on pairs with the wrong opm-common item. Row order is
+        # right, so re-pair positionally and renumber.
+        params = [
+            {"index": 1, "name": "INDEX",  "description": "id",    "units": {}, "default": ""},
+            {"index": 2, "name": "I1",     "description": "low I", "units": {}, "default": ""},
+            {"index": 2, "name": "I2",     "description": "high I", "units": {}, "default": ""},
+            {"index": 3, "name": "DIRECT", "description": "dir",   "units": {}, "default": ""},
+        ]
+        index = {"BCCON": self._manual_entry(sections=("GRID",), params=params)}
+        opm = {"BCCON": {
+            "sections": ["GRID"],
+            "items": [
+                {"name": "INDEX", "value_type": "INT"},
+                {"name": "I1", "value_type": "INT"},
+                {"name": "I2", "value_type": "INT"},
+                {"name": "DIRECTION", "value_type": "STRING"},
+            ],
+        }}
+        merge_opm_common(index, opm)
+        merged = index["BCCON"]["parameters"]
+        assert [(p["index"], p["name"], p["description"]) for p in merged] == [
+            (1, "INDEX", "id"),
+            (2, "I1", "low I"),
+            (3, "I2", "high I"),
+            (4, "DIRECTION", "dir"),
+        ]
+        assert merged[3]["manual_name"] == "DIRECT"
+
+    def test_mis_numbered_table_of_a_different_length_is_left_alone(self):
+        # Without a 1:1 correspondence there is nothing to align to, so the
+        # manual's own numbering still drives the pairing.
+        params = [
+            {"index": 1, "name": "A", "description": "", "units": {}, "default": ""},
+            {"index": 1, "name": "B", "description": "", "units": {}, "default": ""},
+        ]
+        index = {"KW": self._manual_entry(params=params)}
+        opm = {"KW": {"sections": ["RUNSPEC"], "items": [
+            {"name": "FIRST"}, {"name": "SECOND"}, {"name": "THIRD"},
+        ]}}
+        merge_opm_common(index, opm)
+        merged = index["KW"]["parameters"]
+        assert [(p["index"], p["name"]) for p in merged[:2]] == [(1, "FIRST"), (1, "FIRST")]
+
+    def test_correctly_numbered_table_keeps_its_own_indices(self):
+        # A healthy table must not be renumbered — WLIST's "3-52" range and the
+        # rows before it stay exactly as the manual has them.
+        params = [
+            {"index": 1, "name": "WLIST", "description": "", "units": {}, "default": ""},
+            {"index": 2, "name": "ACTION", "description": "", "units": {}, "default": ""},
+            {"index": "3-52", "name": "WELNAMES", "description": "", "units": {}, "default": ""},
+        ]
+        index = {"WLIST": self._manual_entry(sections=("SCHEDULE",), params=params)}
+        opm = {"WLIST": {"sections": ["SCHEDULE"], "items": [
+            {"name": "NAME"}, {"name": "ACTION"},
+            {"name": "WELLS", "size_type": "ALL"},
+        ]}}
+        merge_opm_common(index, opm)
+        assert [p["index"] for p in index["WLIST"]["parameters"]] == [1, 2, "3-52"]
+
+    def test_unnamed_opm_item_leaves_manual_name_in_place(self):
+        params = [{"index": 1, "name": "NPRSVD", "description": "", "units": {}, "default": ""}]
+        index = {"EQLDIMS": self._manual_entry(params=params)}
+        opm = {"EQLDIMS": {"sections": ["RUNSPEC"], "items": [{"value_type": "INT"}]}}
+        merge_opm_common(index, opm)
+        p = index["EQLDIMS"]["parameters"][0]
+        assert p["name"] == "NPRSVD"
+        assert "manual_name" not in p
+
+    def test_records_mode_also_takes_names_from_opm_common(self):
+        params = [
+            {"index": 1, "record": 1, "name": "WELNAME", "description": "", "units": {}, "default": ""},
+            {"index": 1, "record": 2, "name": "SEGNO",   "description": "", "units": {}, "default": ""},
+        ]
+        index = {"WELSEGS": self._manual_entry(sections=("SCHEDULE",), params=params)}
+        opm = {"WELSEGS": {
+            "sections": ["SCHEDULE"],
+            "items": [],
+            "records": [
+                [{"name": "WELL", "value_type": "STRING"}],
+                [{"name": "SEGMENT1", "value_type": "INT"}],
+            ],
+        }}
+        merge_opm_common(index, opm)
+        rec1, rec2 = index["WELSEGS"]["parameters"]
+        assert (rec1["name"], rec1["manual_name"]) == ("WELL", "WELNAME")
+        assert (rec2["name"], rec2["manual_name"]) == ("SEGMENT1", "SEGNO")
+
     def test_keywords_without_opm_match_are_unchanged(self):
         params = [{"index": 1, "name": "X", "description": "", "units": {}, "default": ""}]
         index = {"OBSCURE": self._manual_entry(params=params)}
@@ -1297,6 +1475,12 @@ class TestExtractStringOptions:
     def test_excludes_the_param_name_itself(self):
         desc = "TYPE should be one of: GAS: a gas well. OIL: an oil well."
         assert extract_string_options(desc, "TYPE") == ["GAS", "OIL"]
+
+    def test_excludes_the_manual_name_too(self):
+        # The description is manual prose, so it uses the manual mnemonic
+        # (STATUS) even though the parameter is now named STATE.
+        desc = "STATUS: the operational status. OPEN: open. SHUT: shut."
+        assert extract_string_options(desc, "STATE", "STATUS") == ["OPEN", "SHUT"]
 
     def test_deduplicates_repeated_tokens(self):
         desc = "OPEN: open well. OPEN: same again. SHUT: closed."

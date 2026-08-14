@@ -1,9 +1,10 @@
-// Front-page filtering for the generated keyword reference.
+// Filtering for the generated keyword reference: the front-page keyword list
+// and the manual-name differences table.
 //
-// The full keyword list is server-rendered, so the page works without this
-// script; all we do here is hide rows that do not match. Matching runs against
-// each row's own text, which already contains the name, sections and summary —
-// no extra payload to download.
+// Both lists are server-rendered, so the pages work without this script; all we
+// do here is hide rows that do not match. Matching runs against each row's own
+// text, which already contains everything shown — no extra payload to download.
+// Each block bails out when its page is not the one loaded.
 
 (function () {
   'use strict';
@@ -58,5 +59,39 @@
     });
   });
 
+  apply();
+})();
+
+(function () {
+  'use strict';
+
+  var search = document.getElementById('alias-search');
+  var count = document.getElementById('alias-count');
+  var empty = document.getElementById('alias-empty');
+  var rows = Array.prototype.slice.call(document.querySelectorAll('tr.alias'));
+
+  if (!search || rows.length === 0) return;
+
+  var haystack = rows.map(function (row) {
+    return row.textContent.toLowerCase();
+  });
+
+  function apply() {
+    var needle = search.value.trim().toLowerCase();
+    var shown = 0;
+
+    for (var i = 0; i < rows.length; i++) {
+      var visible = needle === '' || haystack[i].indexOf(needle) !== -1;
+      rows[i].hidden = !visible;
+      if (visible) shown++;
+    }
+
+    count.textContent = shown === rows.length
+      ? rows.length + ' parameters'
+      : shown + ' of ' + rows.length + ' parameters';
+    empty.hidden = shown !== 0;
+  }
+
+  search.addEventListener('input', apply);
   apply();
 })();

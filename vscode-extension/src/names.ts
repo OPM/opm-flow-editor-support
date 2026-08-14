@@ -22,6 +22,13 @@ export type NameKind = 'well' | 'group';
 /** Minimal parameter shape the classifier needs. */
 export interface NameParam {
   name?: string;
+  /**
+   * The reference manual's mnemonic for the same item, present only when it
+   * differs from the opm-common name. Some opm-common names are too generic to
+   * classify on their own (GRUPNET item 1 is just `NAME`) while the manual
+   * spells them out (`GRPNAME`), so it serves as a second chance below.
+   */
+  manual_name?: string;
   value_type?: string;
   options?: string[];
 }
@@ -43,15 +50,22 @@ const GROUP_NAME_RE = /^GR(OU)?P(NAMES?)?S?$/;
  * neither. Enum parameters (those with `options`) are never name slots — the
  * value-completion path already offers their fixed vocabulary — and only
  * string-typed items qualify (an INT `MXWELS` count is not a name).
+ *
+ * The opm-common name is tried first; when it is too descriptive or too vague
+ * to match (`FOLLOW_ON_WELL`, `CHOKE_GROUP`, a bare `NAME`) the manual's
+ * mnemonic gets a turn, which is what keeps GRUPNET / NODEPROP / WTRACER
+ * offering deck names.
  */
 export function classifyNameParam(param: NameParam): NameKind | null {
   if (param.options && param.options.length) return null;
   const vt = param.value_type;
   if (vt && vt !== 'STRING' && vt !== 'RAW_STRING') return null;
-  const name = (param.name || '').toUpperCase().replace(/_/g, '');
-  if (!name) return null;
-  if (WELL_NAME_RE.test(name)) return 'well';
-  if (GROUP_NAME_RE.test(name)) return 'group';
+  for (const candidate of [param.name, param.manual_name]) {
+    const name = (candidate || '').toUpperCase().replace(/_/g, '');
+    if (!name) continue;
+    if (WELL_NAME_RE.test(name)) return 'well';
+    if (GROUP_NAME_RE.test(name)) return 'group';
+  }
   return null;
 }
 
