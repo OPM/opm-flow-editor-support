@@ -145,6 +145,8 @@ Releases are tag-driven. On pushing a `v*` tag, CI:
 3. Attaches the VSIX to a GitHub Release.
 4. Publishes the VSIX to the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=magne-sjaastad.opm-flow-editor-support)
    using the `VSCE_PAT` repo secret.
+5. Publishes the same VSIX to [Open VSX](https://open-vsx.org/extension/magne-sjaastad/opm-flow-editor-support)
+   using the `OVSX_PAT` repo secret.
 
 ```sh
 # bump vscode-extension/package.json "version"
@@ -167,4 +169,30 @@ To publish manually from a workstation (bypassing CI):
 cd vscode-extension
 npx vsce login magne-sjaastad   # one-time, paste PAT
 npx vsce publish                # bumps version interactively if asked
+```
+
+### Open VSX publishing prerequisites
+
+Open VSX is the registry used by VSCodium, Cursor, Gitpod and other non-Microsoft
+builds. Setup is one-time:
+
+- **Eclipse account**: sign in at [open-vsx.org](https://open-vsx.org) with GitHub and
+  sign the **Eclipse Publisher Agreement** in your profile. Publishing fails without it.
+- **Namespace**: must match the `publisher` field in `package.json`.
+  `npx ovsx create-namespace magne-sjaastad -p <token>` (one-time).
+- **Repo secret `OVSX_PAT`**: an access token from open-vsx.org → Profile → Access Tokens.
+
+Check the token and namespace without uploading anything:
+
+```sh
+npx ovsx verify-pat magne-sjaastad -p <token>
+```
+
+Note that Open VSX has no staging registry, `ovsx publish` has no dry-run mode, and a
+published version cannot be replaced or removed by its owner — only by registry admins.
+To publish manually from a workstation:
+
+```sh
+cd vscode-extension
+npx ovsx publish opm-flow-editor-support-<version>.vsix -p <token>
 ```
