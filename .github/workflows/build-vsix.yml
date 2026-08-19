@@ -121,11 +121,9 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: npx --yes @vscode/vsce@3.9.1 publish --packagePath opm-flow-editor-support-*.vsix --pat "$VSCE_PAT"
 
-  # Disabled until Open VSX account + OVSX_PAT secret are set up.
-  # To re-enable: change `if: false` back to `if: startsWith(github.ref, 'refs/tags/v')`.
   publish-ovsx:
     needs: package
-    if: false
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Setup Node.js
