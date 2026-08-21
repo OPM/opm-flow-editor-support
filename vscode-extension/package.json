@@ -374,6 +374,20 @@
           "default": 3,
           "description": "Number of spaces inserted before each record row when the table has a column heading (a -- comment with one label per column). Applied by Add Column Headers and when Align Record Columns aligns a table under its heading.",
           "scope": "resource"
+        },
+        "opm-flow.formatting.headingNames": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "opm-common"
+          ],
+          "enumDescriptions": [
+            "Use the reference manual's mnemonic (WELSPECS reads WELNAME GRPNAME I J BHPREF TYPE). Shorter, so tables stay narrow, and it matches the names printed in the manual.",
+            "Use opm-common's item name, what the parser itself calls the item (WELSPECS reads WELL GROUP HEAD_I HEAD_J REF_DEPTH PHASE). Matches the names shown in hovers, the keyword docs panel and diagnostics."
+          ],
+          "default": "manual",
+          "description": "Which spelling Add Column Headers writes for each parameter. The two differ only where the manual and opm-common disagree on an item name; a heading written under either setting is still recognised and updated in place.",
+          "scope": "resource"
         }
       }
     }

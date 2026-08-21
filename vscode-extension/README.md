@@ -297,9 +297,25 @@ keyword documentation, then align the records to those positions.
 
 Existing comments around the table are ignored, so a descriptive comment above the
 data is never mistaken for a heading. If the line directly above the group is a
-heading this command previously generated (its words are exactly the column names),
-it is updated in place; otherwise a new heading line is inserted. Running the command
-multiple times is idempotent.
+heading this command previously generated (its words are exactly the column names,
+in either spelling — see below), it is updated in place; otherwise a new heading line
+is inserted. Running the command multiple times is idempotent.
+
+Where the reference manual and opm-common disagree on an item's name, which of the
+two the heading uses is set by `opm-flow.formatting.headingNames` — the manual's
+mnemonic by default, or the parser's own name — see [Settings](#settings):
+
+```
+-- headingNames: manual (default)
+WELSPECS
+-- WELNAME GRPNAME I J BHPREF TYPE
+   'OP1'   'GRP1'  5 8 2510.0 OIL /
+
+-- headingNames: opm-common
+WELSPECS
+-- WELL  GROUP  HEAD_I HEAD_J REF_DEPTH PHASE
+   'OP1' 'GRP1'      5      8 2510.0    OIL /
+```
 
 Example — cursor anywhere inside the `VFPIDIMS` record:
 ```
@@ -399,6 +415,7 @@ you can override them per-workspace or per-folder.
 | `opm-flow.formatting.alignColumnsExcludedKeywords` | `[]` | Extra keywords to skip when aligning record columns. Names are upper-cased on read; matching is case-insensitive. Honoured by all three [Align Record Columns](#align-record-columns) commands, and *added* to the built-in deck-sweep defaults (per-cell grid/region arrays like `PORO`/`PERMX`/`COORD` and large `VFPPROD`/`VFPINJ` tables, which **Align … in Deck** already skips). |
 | `opm-flow.formatting.recordIndent` | `2` | Number of spaces placed before each record row when aligning a table that has **no** column heading. Applied by every [Align Record Columns](#align-record-columns) command (and to `UDQ` statement blocks). |
 | `opm-flow.formatting.headingIndent` | `3` | Number of spaces placed before each record row when the table **has** a column heading (a `--` comment with one label per column). Applied by [Add Column Headers](#add-column-headers) and when alignment keeps a table lined up under its heading. |
+| `opm-flow.formatting.headingNames` | `"manual"` | Which spelling [Add Column Headers](#add-column-headers) writes for each parameter, where the reference manual and opm-common disagree. `manual` uses the manual's mnemonic (`WELNAME`, `BHPREF`) — shorter, so tables stay narrow, and it matches the printed manual. `opm-common` uses the parser's own item name (`WELL`, `REF_DEPTH`), matching hovers, the keyword docs panel and diagnostics. A heading written under either setting is recognised and updated in place, so switching does not leave a stale duplicate behind. |
 
 ### Simulator
 

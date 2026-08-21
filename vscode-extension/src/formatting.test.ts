@@ -12,6 +12,7 @@ import {
   matchHeadingForGroup,
   formatRecordGroupWithHeading,
   buildHeadingAndAlignedRecords,
+  headingNameFor,
   tokenColumnCount,
   toggleLineComments,
   matchSectionLine,
@@ -1042,5 +1043,42 @@ describe('toggleLineComments', () => {
   test('returns null when there is nothing to toggle', () => {
     expect(toggleLineComments([])).toBeNull();
     expect(toggleLineComments(['', '   '])).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// headingNameFor — which spelling a generated column heading uses
+// ---------------------------------------------------------------------------
+
+describe('headingNameFor', () => {
+  // COMPDAT item 1: WELL to the parser, WELNAME in the manual.
+  const bothNames = { name: 'WELL', manual_name: 'WELNAME' };
+  // COMPDAT item 2: the two agree, so no manual_name was recorded.
+  const opmOnly = { name: 'I' };
+
+  test('prefers the manual mnemonic under the manual setting', () => {
+    expect(headingNameFor(bothNames, 'manual', 'COL1')).toBe('WELNAME');
+  });
+
+  test('prefers the opm-common name under the opm-common setting', () => {
+    expect(headingNameFor(bothNames, 'opm-common', 'COL1')).toBe('WELL');
+  });
+
+  test('falls back to the other spelling when the two agree', () => {
+    expect(headingNameFor(opmOnly, 'manual', 'COL2')).toBe('I');
+    expect(headingNameFor(opmOnly, 'opm-common', 'COL2')).toBe('I');
+  });
+
+  test('an index predating opm-common names still yields manual mnemonics', () => {
+    // Older indexes carry the manual's spelling in `name` and no manual_name,
+    // so both settings resolve to it rather than to the COL placeholder.
+    const legacy = { name: 'BHPREF' };
+    expect(headingNameFor(legacy, 'manual', 'COL5')).toBe('BHPREF');
+    expect(headingNameFor(legacy, 'opm-common', 'COL5')).toBe('BHPREF');
+  });
+
+  test('falls back to the placeholder for an undocumented column', () => {
+    expect(headingNameFor(undefined, 'manual', 'COL7')).toBe('COL7');
+    expect(headingNameFor({}, 'opm-common', 'COL7')).toBe('COL7');
   });
 });
