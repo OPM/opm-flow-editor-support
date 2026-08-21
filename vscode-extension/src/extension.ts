@@ -19,6 +19,8 @@ import {
   matchHeadingForGroup,
   tokenColumnCount,
   toggleLineComments,
+  headingNameFor,
+  HeadingNameSource,
 } from './formatting';
 import { computeDiagnostics, DiagnosticCode, AnalysisIndex } from './analysis';
 import { prepareKeywordIndex } from './keyword-supplement';
@@ -44,6 +46,12 @@ import {
 interface Parameter {
   index: number | string;
   name: string;
+  /**
+   * The reference manual's mnemonic for the same item, recorded only where it
+   * differs from the opm-common `name` (COMPDAT item 1 is `WELL` to the parser
+   * and `WELNAME` in the manual).
+   */
+  manual_name?: string;
   description: string;
   units: { field?: string; metric?: string; laboratory?: string };
   default: string;
@@ -1082,6 +1090,18 @@ function getAlignIndents(resource?: vscode.Uri): AlignIndents {
   };
 }
 
+/**
+ * Read the configured spelling for generated column headings. Anything other
+ * than the two known values falls back to the manual's mnemonic, which is what
+ * every release before the setting existed wrote.
+ */
+function getHeadingNameSource(resource?: vscode.Uri): HeadingNameSource {
+  const raw = vscode.workspace
+    .getConfiguration('opm-flow.formatting', resource ?? null)
+    .get<string>('headingNames', 'manual');
+  return raw === 'opm-common' ? 'opm-common' : 'manual';
+}
+
 /** A diagnostic carrying the extra fields the quick-fix provider reads back
  *  off `context.diagnostics` (same object instances within the host). */
 type OpmDiagnostic = vscode.Diagnostic & { suggestion?: string };
@@ -1733,13 +1753,22 @@ export function activate(context: vscode.ExtensionContext): void {
     const entry = kwName ? index[kwName] : undefined;
     const record = entry ? findActiveRecord(doc, entry, groupPos) : 1;
     const tokens = group[0].tokens;
+    const nameSource = getHeadingNameSource(doc.uri);
+    // The configured spelling is what gets written; the other one is kept so a
+    // heading written under the previous setting — or by a release that only
+    // knew the manual's names — is still recognised below and replaced rather
+    // than duplicated.
     const names: string[] = [];
+    const altNames: string[] = [];
+    const otherSource: HeadingNameSource = nameSource === 'manual' ? 'opm-common' : 'manual';
     let paramIdx = 1;
     for (const tok of tokens) {
       const param = entry
         ? findParam(entry, record, p => Number(p.index) === paramIdx)
         : undefined;
-      names.push(param?.name ?? `COL${paramIdx}`);
+      const fallback = `COL${paramIdx}`;
+      names.push(headingNameFor(param, nameSource, fallback));
+      altNames.push(headingNameFor(param, otherSource, fallback));
       paramIdx += tokenColumnCount(tok);
     }
     // Build the heading and the matching aligned records from the data alone.
@@ -1750,14 +1779,15 @@ export function activate(context: vscode.ExtensionContext): void {
       buildHeadingAndAlignedRecords(group, names, getAlignIndents(doc.uri).heading);
 
     // Idempotency: if the line directly above the group is a heading this
-    // command previously generated (its words are exactly the column names),
-    // replace it in place; otherwise insert a fresh heading above the group.
-    // Any other comment is left untouched.
+    // command previously generated (its words are exactly the column names, in
+    // either spelling), replace it in place; otherwise insert a fresh heading
+    // above the group. Any other comment is left untouched.
     const prevLineIdx = groupStartLine - 1;
     const prevMatch = prevLineIdx >= 0 ? doc.lineAt(prevLineIdx).text.match(/^\s*--\s*(.*)$/) : null;
     const prevTokens = prevMatch ? prevMatch[1].trim().split(/\s+/).filter(Boolean) : [];
-    const replaceHeading = prevTokens.length === names.length
-      && prevTokens.every((t, i) => t === names[i]);
+    const isGeneratedHeading = (candidate: string[]) =>
+      prevTokens.length === candidate.length && prevTokens.every((t, i) => t === candidate[i]);
+    const replaceHeading = isGeneratedHeading(names) || isGeneratedHeading(altNames);
 
     await editor.edit(b => {
       for (let k = 0; k < groupLines.length; k++) {

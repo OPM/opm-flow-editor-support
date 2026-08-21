@@ -583,6 +583,43 @@ export function formatRecordGroupWithHeading(records: RecordLine[], headingPosit
   });
 }
 
+/**
+ * Which spelling a generated column heading uses for a parameter.
+ *
+ *   - `manual`: the reference manual's mnemonic (`WELNAME`, `BHPREF`) — short,
+ *     and what a reader of the manual is looking for.
+ *   - `opm-common`: the parser's own item name (`WELL`, `REF_DEPTH`) — what
+ *     hovers, the docs panel and diagnostics speak.
+ *
+ * The two only differ where the index recorded a `manual_name`; everywhere else
+ * both settings produce the same label.
+ */
+export type HeadingNameSource = 'manual' | 'opm-common';
+
+/** The subset of a parameter a heading label is built from. */
+export interface HeadingNameParam {
+  name?: string;
+  manual_name?: string;
+}
+
+/**
+ * Pick the heading label for one column. Falls back to the other spelling when
+ * the preferred one is missing — an index built before parameter names were
+ * taken from opm-common has no `manual_name` at all, and its `name` already
+ * holds the manual's mnemonic — and to `fallback` when the column has no
+ * documented parameter behind it.
+ */
+export function headingNameFor(
+  param: HeadingNameParam | undefined,
+  source: HeadingNameSource,
+  fallback: string,
+): string {
+  if (!param) return fallback;
+  const preferred = source === 'manual' ? param.manual_name : param.name;
+  const other = source === 'manual' ? param.name : param.manual_name;
+  return preferred || other || fallback;
+}
+
 // Build a heading comment and consistently aligned records in one pass
 export function buildHeadingAndAlignedRecords(
   records: RecordLine[],
