@@ -9,6 +9,10 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    ignore:
+      # @types/vscode must stay in sync with the "engines.vscode" range in
+      # package.json; bumping it independently breaks `vsce package`.
+      - dependency-name: "@types/vscode"
 
   # Python build-time deps used by the keyword-index generator.
   - package-ecosystem: pip
