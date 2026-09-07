@@ -10,9 +10,16 @@ updates:
       dev-dependencies:
         dependency-type: development
     ignore:
-      # @types/vscode must stay in sync with the "engines.vscode" range in
-      # package.json; bumping it independently breaks `vsce package`.
+      # @types/vscode must stay within the "engines.vscode" range in
+      # package.json (currently ^1.74.0); a minor/major bump breaks
+      # `vsce package`. Patch updates are still allowed. When
+      # intentionally raising engines.vscode, temporarily remove this
+      # ignore rule to let Dependabot propose the matching @types/vscode
+      # bump, then restore it.
       - dependency-name: "@types/vscode"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
 
   # Python build-time deps used by the keyword-index generator.
   - package-ecosystem: pip
