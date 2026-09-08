@@ -32,7 +32,14 @@ import {
 } from './udq';
 import { buildOutline, OutlineNode } from './outline';
 import { findFileReferences } from './links';
-import { parsePathsAliases, resolvePathAlias, prtCandidatePaths, collectDeckIncludeFiles } from './paths';
+import {
+  parsePathsAliases,
+  resolvePathAlias,
+  prtCandidatePaths,
+  collectDeckIncludeFiles,
+  resolveSymlinkSurrogate,
+  SurrogateFs,
+} from './paths';
 import { DEFAULT_DIAGNOSTICS_EXCLUDED_KEYWORDS } from './diagnostics-exclusions';
 import { DEFAULT_ALIGN_COLUMNS_EXCLUDED_KEYWORDS } from './align-exclusions';
 import { buildKeywordSnippet } from './boilerplate';
@@ -1019,6 +1026,50 @@ class OpmFlowOutlineProvider implements vscode.TreeDataProvider<OutlineNode> {
   }
 }
 
+/**
+ * A `SurrogateFs` over the real filesystem, memoised for the life of one
+ * resolve pass. Every component of every reference path is probed, and a
+ * deck resolves the same directories over and over, so a short-lived cache
+ * keeps that down to one stat each. Create a fresh one per pass so nothing
+ * is held across a file being edited on disk.
+ */
+function createSurrogateFs(): SurrogateFs {
+  const sizes = new Map<string, number | null>();
+  const texts = new Map<string, string | null>();
+  const dirs = new Map<string, boolean>();
+  const memo = <T>(cache: Map<string, T>, key: string, compute: () => T): T => {
+    const hit = cache.get(key);
+    if (hit !== undefined || cache.has(key)) return hit as T;
+    const value = compute();
+    cache.set(key, value);
+    return value;
+  };
+  return {
+    statFileSize: p => memo(sizes, p, () => {
+      try {
+        const st = fs.statSync(p);
+        return st.isFile() ? st.size : null;
+      } catch {
+        return null;
+      }
+    }),
+    readText: p => memo(texts, p, () => {
+      try {
+        return fs.readFileSync(p, 'utf8');
+      } catch {
+        return null;
+      }
+    }),
+    isDirectory: p => memo(dirs, p, () => {
+      try {
+        return fs.statSync(p).isDirectory();
+      } catch {
+        return false;
+      }
+    }),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // File-reference link provider — INCLUDE / IMPORT / RESTART / GDFILE
 // ---------------------------------------------------------------------------
@@ -1031,11 +1082,14 @@ class FileReferenceLinkProvider implements vscode.DocumentLinkProvider {
     const lines: string[] = [];
     for (let i = 0; i < document.lineCount; i++) lines.push(document.lineAt(i).text);
     const aliases = parsePathsAliases(lines);
+    const surrogateFs = createSurrogateFs();
 
     return findFileReferences(lines).map(ref => {
       const range = new vscode.Range(ref.line, ref.startChar, ref.line, ref.endChar);
       const resolved = resolvePathAlias(ref.rawPath, aliases);
-      const absPath = path.resolve(docDir, resolved);
+      // The target may be a surrogate left by a symlink that did not
+      // survive the crossing to Windows; open what it stands for.
+      const absPath = resolveSymlinkSurrogate(path.resolve(docDir, resolved), surrogateFs);
       return new vscode.DocumentLink(range, vscode.Uri.file(absPath));
     });
   }
@@ -1886,13 +1940,20 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     const excludedKeywords = getAlignColumnsExcludedKeywords(rootUri, true);
     const indents = getAlignIndents(rootUri);
-    const deckFiles = collectDeckIncludeFiles(rootUri.fsPath, fsPath => {
-      try {
-        return fs.readFileSync(fsPath, 'utf8').split(/\r?\n/);
-      } catch {
-        return null;
-      }
-    });
+    const surrogateFs = createSurrogateFs();
+    const deckFiles = collectDeckIncludeFiles(
+      rootUri.fsPath,
+      fsPath => {
+        try {
+          return fs.readFileSync(fsPath, 'utf8').split(/\r?\n/);
+        } catch {
+          return null;
+        }
+      },
+      new Set(),
+      // Align the file a surrogate stands for, not the stored path.
+      fsPath => resolveSymlinkSurrogate(fsPath, surrogateFs),
+    );
     const we = new vscode.WorkspaceEdit();
     let totalEdits = 0;
     let filesChanged = 0;
