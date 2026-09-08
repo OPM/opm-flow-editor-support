@@ -487,6 +487,37 @@ The language is registered as `opm-flow`.
 
 ## Release Notes
 
+### 0.9.1
+
+- **Parameter names come from opm-common** — every parameter now takes its name
+  from the parser's own definitions, keeping the reference manual's mnemonic
+  alongside it where the two differ (1 220 parameters across 366 keywords).
+  Hovers, completion and diagnostics all speak the parser's language, and the
+  manual's spelling is still shown beneath it.
+- **Choose the spelling used by Add Column Headers** — the new
+  `opm-flow.formatting.headingNames` setting picks between the manual's
+  mnemonics (`WELNAME`, `BHPREF`) and opm-common's item names (`WELL`,
+  `REF_DEPTH`). It defaults to `manual`, so existing decks keep the headings
+  they have; the parser's names are longer and reflow tables wider. A heading
+  written under either setting is recognised and updated in place, so switching
+  never leaves a stale duplicate behind.
+- **`INCLUDE` links follow Linux symlinks on Windows** — a symlink made on
+  Linux does not always survive the crossing to Windows: what arrives in its
+  place is an ordinary file holding the target path, which the editor used to
+  open as if it were deck text. Both known forms are now followed — the
+  Minshall+French files a CIFS share mounted with `mfsymlinks` leaves behind,
+  and a bare path from a copy that flattened the link — at every component of
+  the path, so symlinking a whole `include/` directory works too.
+- **Keyword reference published as a website** — the full keyword data is now
+  browsable at <https://opm.github.io/opm-flow-editor-support/>: one page per
+  keyword with sections, parameters, examples and record structure, a
+  searchable front page covering all 3 161 keywords, and an overview of every
+  parameter whose manual mnemonic differs from the opm-common name.
+- **Available on Open VSX** — releases are published to
+  [Open VSX](https://open-vsx.org/extension/magne-sjaastad/opm-flow-editor-support)
+  as well as the VS Code Marketplace, so VSCodium, Cursor and Gitpod can install
+  the extension from their own registry.
+
 ### 0.9.0
 
 - **Keyword reference moved to the bottom panel** — the **OPM Keyword Reference**
