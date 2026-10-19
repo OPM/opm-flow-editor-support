@@ -178,9 +178,11 @@ pytest suite runs as part of the existing `pytest scripts/`.
 
 ### Publishing
 
-The `build-index` job in `.github/workflows/build-vsix.yml` builds the site and
-uploads it as a Pages artifact on every run; the `deploy-pages` job publishes it
-on pushes to `main`. Pull requests build but do not deploy.
+The standalone `.github/workflows/deploy-pages.yml` workflow rebuilds the keyword
+index and site, uploads the Pages artifact, and deploys on pushes to `main`.
+The `build-index` job in `.github/workflows/build-vsix.yml` still builds the site
+to validate generation, including on pull requests, but does not upload or deploy
+it. Pages configuration, approvals, and concurrency are isolated from VSIX builds.
 
 > **One-time repository setup:** GitHub Pages must be switched to
 > **Settings → Pages → Source: GitHub Actions**. Until then `deploy-pages`
