@@ -49,20 +49,14 @@ jobs:
           path: vscode-extension/data/keyword_index_compact.json
           if-no-files-found: error
 
-      # The documentation site is built here rather than in its own workflow so
-      # it reuses the full keyword_index.json produced above — only the full
-      # index carries the descriptions the site renders, and it is gitignored.
+      # Validate site generation on pull requests too, reusing the full index.
+      # Deployment is handled independently by deploy-pages.yml.
       - name: Build documentation site
         run: |
           python scripts/build_keyword_site.py \
             --index keyword_index.json \
             --output site \
             --manual-ref "$(git -C opm-reference-manual rev-parse HEAD)"
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
-        with:
-          path: site
 
   package:
     needs: build-index
@@ -114,29 +108,6 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3
         with:
           files: vscode-extension/opm-flow-editor-support-*.vsix
-
-  # Publishes the keyword reference to GitHub Pages. Pull requests build the
-  # site in build-index (catching generator breakage) but never deploy.
-  #
-  # Requires Settings -> Pages -> Source: "GitHub Actions" on the repository;
-  # until that is set, this job fails with "Pages is not enabled".
-  deploy-pages:
-    needs: build-index
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    concurrency:
-      group: pages
-      cancel-in-progress: false
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
 
   publish-marketplace:
     needs: package
